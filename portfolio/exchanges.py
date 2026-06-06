@@ -34,6 +34,14 @@ def fetch_all():
         try:
             klass = getattr(ccxt, name)
             client = klass({**creds, "enableRateLimit": True})
+            # Bybit : permet d'utiliser le miroir (bytick.com) si bybit.com
+            # est bloque geographiquement.
+            if name == "bybit" and config.BYBIT_HOSTNAME:
+                try:
+                    client.hostname = config.BYBIT_HOSTNAME
+                    client.urls["api"] = client.describe()["urls"]["api"]
+                except Exception:  # pragma: no cover - selon version de ccxt
+                    pass
             balance = client.fetch_balance()
             totals = balance.get("total", {}) or {}
             label = name.capitalize()

@@ -24,11 +24,13 @@ log = logging.getLogger("portfolio.markets")
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Mozilla/5.0"})
 
-BYBIT = "https://api.bybit.com"
 BITGET = "https://api.bitget.com"
 
 # Memoire du dernier OI vu (pour estimer la variation cote Bitget).
 _prev_oi = {}
+
+# Memoire de l'hote Bybit qui repond (evite de retester les hotes morts).
+_bybit_host = {"ok": None}
 
 
 def _f(x, default=0.0):
@@ -63,9 +65,26 @@ def _cvd_from_candles(candles, period=14):
 # Bybit
 # --------------------------------------------------------------------------- #
 def _bybit_list(path, params):
-    r = SESSION.get(BYBIT + path, params=params, timeout=12)
-    r.raise_for_status()
-    return r.json().get("result", {}).get("list", []) or []
+    """GET Bybit avec bascule automatique entre hotes (bybit.com -> bytick.com)."""
+    hosts = list(config.BYBIT_HOSTS)
+    # On essaie d'abord l'hote connu comme fonctionnel.
+    if _bybit_host["ok"] in hosts:
+        hosts.remove(_bybit_host["ok"])
+        hosts.insert(0, _bybit_host["ok"])
+    last_err = None
+    for host in hosts:
+        try:
+            r = SESSION.get("https://" + host + path, params=params, timeout=12)
+            r.raise_for_status()
+            data = r.json()
+            if str(data.get("retCode", 0)) not in ("0", "None"):
+                raise ValueError(data.get("retMsg", "erreur Bybit"))
+            _bybit_host["ok"] = host
+            return data.get("result", {}).get("list", []) or []
+        except (requests.RequestException, ValueError) as e:
+            last_err = e
+            continue
+    raise last_err if last_err else RuntimeError("Bybit injoignable")
 
 
 def bybit_market(symbol):

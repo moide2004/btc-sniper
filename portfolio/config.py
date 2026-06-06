@@ -56,6 +56,14 @@ MARKET_SYMBOLS = _split(os.environ.get("MARKET_SYMBOLS", "BTCUSDT")) or ["BTCUSD
 # Exchanges pour les donnees de marche (publiques).
 MARKET_EXCHANGES = _split(os.environ.get("MARKET_EXCHANGES", "bybit,bitget")) or ["bybit", "bitget"]
 
+# Hotes Bybit a essayer dans l'ordre (bascule automatique en cas de blocage).
+# api.bytick.com est le miroir officiel, utile si api.bybit.com est filtre.
+BYBIT_HOSTS = _split(os.environ.get("BYBIT_HOSTS", "")) or [
+    "api.bybit.com", "api.bytick.com",
+]
+# Hostname CCXT pour les soldes Bybit (ex. "bytick.com" si bybit.com bloque).
+BYBIT_HOSTNAME = os.environ.get("BYBIT_HOSTNAME", "")
+
 # Devise de reference pour la valorisation.
 VS_CURRENCY = os.environ.get("VS_CURRENCY", "usd").lower()
 
