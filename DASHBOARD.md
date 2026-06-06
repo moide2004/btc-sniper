@@ -3,16 +3,26 @@
 Agrège en **lecture seule** tes comptes crypto (exchanges + wallets) et affiche
 la valeur totale en temps réel sur une page web protégée par mot de passe.
 
-## Sources supportées (v1)
+## Ce que montre le tableau de bord
+
+**1. Tes comptes (montant des portefeuilles)** — soldes via clé API lecture seule :
 
 | Source | Connexion | Ce qui est lu |
 |---|---|---|
-| **Bitget** (et Binance, Bybit) | Clé API **lecture seule** | Tous les soldes |
-| **MetaMask** (Ethereum) | **Adresse publique** | ETH natif* |
-| **Phantom** (Solana) | **Adresse publique** | SOL + tous les tokens SPL |
+| **Bitget** / **Bybit** (et Binance) | Clé API **lecture seule** | Tous les soldes |
 
-\* L'énumération automatique des tokens ERC-20 d'une adresse Ethereum
-nécessite un service d'indexation (clé API) — prévu pour une prochaine version.
+**2. Données de marché en temps réel** — via endpoints **publics** (aucune clé) :
+
+| Donnée | Bybit | Bitget |
+|---|---|---|
+| Prix, variation 24h, funding, volume | ✅ | ✅ |
+| Open Interest (+ variation) | ✅ (intervalle 5 min) | ✅ (Δ depuis dernier refresh) |
+| Ratio Long / Short des comptes | ✅ | ✅ |
+| CVD (approximation depuis bougies) | ✅ | ✅ |
+
+> Le **CVD** affiché est une **approximation** calculée depuis les bougies
+> (position de la clôture dans la mèche × volume). Un CVD exact nécessiterait
+> le détail des trades agressifs, non fourni par les endpoints publics.
 
 ## 🔒 Sécurité (rappel)
 
@@ -34,8 +44,9 @@ nécessite un service d'indexation (clé API) — prévu pour une prochaine vers
    - `DASHBOARD_PASSWORD` : ton mot de passe pour la page web.
    - `FLASK_SECRET_KEY` : `python3 -c "import secrets; print(secrets.token_hex(32))"`
    - `BITGET_API_KEY` / `BITGET_API_SECRET` / `BITGET_API_PASSWORD` (lecture seule)
-   - `EVM_ADDRESSES` : ton/tes adresses MetaMask publiques (séparées par virgules)
-   - `SOLANA_ADDRESSES` : ton/tes adresses Phantom publiques
+   - `BYBIT_API_KEY` / `BYBIT_API_SECRET` (lecture seule) pour les soldes Bybit
+   - (optionnel) `MARKET_SYMBOLS` : ex. `BTCUSDT,ETHUSDT` — les données de
+     marché sont publiques et ne nécessitent aucune clé.
 
 ## Lancer en local (pour tester)
 

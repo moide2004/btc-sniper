@@ -29,6 +29,11 @@
     .err { background:#2d1417; border:1px solid #5c2a2f; color:#ffb3b8;
            padding:10px 14px; border-radius:10px; margin-bottom:18px; font-size:13px; }
     .muted { color:#8b949e; }
+    h2 { font-size:15px; color:#8b949e; margin:30px 0 10px; text-transform:uppercase;
+         letter-spacing:.5px; }
+    .up { color:#3fb950; } .down { color:#f85149; }
+    .bar { display:inline-block; height:8px; border-radius:4px; vertical-align:middle; }
+    .market td, .market th { font-size:13px; }
   </style>
 </head>
 <body>
@@ -79,8 +84,51 @@
     </tbody>
   </table>
 
+  <h2>📡 Données de marché (temps réel)</h2>
+
+  {% if m.errors %}
+    <div class="err">⚠️ {{ m.errors|join(' · ') }}</div>
+  {% endif %}
+
+  <table class="market">
+    <thead>
+      <tr>
+        <th>Marché</th><th>Prix</th><th>24h</th><th>Funding</th>
+        <th>Open Interest</th><th>OI Δ</th><th>Long / Short</th><th>Ratio L/S</th><th>CVD</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in m.rows %}
+        <tr>
+          <td><b>{{ r.exchange }}</b> <span class="src">· {{ r.symbol }}</span></td>
+          <td>{{ "{:,.2f}".format(r.price) if r.price else "—" }}</td>
+          <td class="{{ 'up' if (r.change_24h or 0) >= 0 else 'down' }}">
+            {{ "{:+.2f}%".format(r.change_24h) if r.change_24h is not none else "—" }}</td>
+          <td class="{{ 'up' if (r.funding or 0) >= 0 else 'down' }}">
+            {{ "{:+.4f}%".format(r.funding * 100) if r.funding is not none else "—" }}</td>
+          <td>{{ "{:,.0f}".format(r.oi_usd) ~ " $" if r.oi_usd else "—" }}</td>
+          <td class="{{ 'up' if (r.oi_change or 0) >= 0 else 'down' }}">
+            {{ "{:+.2f}%".format(r.oi_change) if r.oi_change is not none else "—" }}</td>
+          <td>
+            {% if r.long_pct is not none %}
+              <span class="up">{{ "%.1f"|format(r.long_pct) }}%</span> /
+              <span class="down">{{ "%.1f"|format(r.short_pct) }}%</span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="{{ 'up' if (r.ls_ratio or 0) >= 1 else 'down' }}">
+            {{ "%.2f"|format(r.ls_ratio) if r.ls_ratio is not none else "—" }}</td>
+          <td class="{{ 'up' if r.cvd_dir == 'BUY' else 'down' if r.cvd_dir == 'SELL' else '' }}">
+            {% if r.cvd is not none %}{{ r.cvd_dir }} {{ "{:,.0f}".format(r.cvd) }}{% else %}—{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="muted" style="text-align:center;">Aucune donnée.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
   <p class="sub" style="margin-top:18px;">
-    Lecture seule · aucune clé privée n'est utilisée · prix via CoinGecko
+    Lecture seule · soldes via clés API · données marché publiques (Bybit/Bitget)
+    · prix via CoinGecko · CVD = approximation depuis les bougies
   </p>
 </div>
 </body>

@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from . import config, exchanges, prices, wallets
+from . import config, exchanges, prices
 
 log = logging.getLogger("portfolio.aggregate")
 
@@ -51,9 +51,6 @@ def build_portfolio():
     errors = []
 
     h, e = exchanges.fetch_all()
-    holdings += h
-    errors += e
-    h, e = wallets.fetch_all()
     holdings += h
     errors += e
 

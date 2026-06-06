@@ -50,13 +50,11 @@ if _bybit_key:
         "secret": os.environ.get("BYBIT_API_SECRET", ""),
     }
 
-# --- Wallets (ADRESSES PUBLIQUES uniquement) ------------------------------- #
-EVM_ADDRESSES = _split(os.environ.get("EVM_ADDRESSES", ""))      # MetaMask (Ethereum)
-SOLANA_ADDRESSES = _split(os.environ.get("SOLANA_ADDRESSES", ""))  # Phantom (Solana)
-
-# Points d'acces blockchain publics (modifiables si besoin).
-EVM_RPC_URL = os.environ.get("EVM_RPC_URL", "https://eth.llamarpc.com")
-SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+# --- Donnees de marche (endpoints PUBLICS, aucune cle) --------------------- #
+# Symboles a suivre (perpetuels USDT), separes par des virgules.
+MARKET_SYMBOLS = _split(os.environ.get("MARKET_SYMBOLS", "BTCUSDT")) or ["BTCUSDT"]
+# Exchanges pour les donnees de marche (publiques).
+MARKET_EXCHANGES = _split(os.environ.get("MARKET_EXCHANGES", "bybit,bitget")) or ["bybit", "bitget"]
 
 # Devise de reference pour la valorisation.
 VS_CURRENCY = os.environ.get("VS_CURRENCY", "usd").lower()

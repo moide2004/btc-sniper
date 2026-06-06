@@ -16,6 +16,7 @@ from flask import (Flask, redirect, render_template, request, session, url_for)
 
 from portfolio import config
 from portfolio.aggregate import get_portfolio
+from portfolio.markets import get_markets
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -62,7 +63,8 @@ def logout():
 def index():
     force = request.args.get("refresh") == "1"
     data = get_portfolio(force=force)
-    return render_template("dashboard.html", p=data)
+    markets = get_markets(force=force)
+    return render_template("dashboard.html", p=data, m=markets)
 
 
 if __name__ == "__main__":
