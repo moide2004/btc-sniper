@@ -1,4 +1,5 @@
 requests>=2.31
+python-dotenv>=1.0
 # zoneinfo fait partie de la stdlib depuis Python 3.9.
 # Sur Python < 3.9 uniquement, decommentez la ligne suivante :
 # backports.zoneinfo

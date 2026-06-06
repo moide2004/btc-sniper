@@ -31,6 +31,14 @@ try:
 except ImportError:  # pragma: no cover - fallback pour les vieux Python
     from backports.zoneinfo import ZoneInfo
 
+# Charge automatiquement les secrets depuis un fichier .env s'il existe
+# (et si python-dotenv est installe). Le .env n'est jamais versionne.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 # --------------------------------------------------------------------------- #
 # Configuration
