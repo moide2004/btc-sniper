@@ -1,5 +1,11 @@
+# --- Bot d'alertes BTC Sniper ---
 requests>=2.31
 python-dotenv>=1.0
+
+# --- Tableau de bord portefeuille (dashboard.py) ---
+ccxt>=4.2          # acces lecture seule aux exchanges (Bitget, etc.)
+flask>=3.0         # tableau de bord web
+
 # zoneinfo fait partie de la stdlib depuis Python 3.9.
 # Sur Python < 3.9 uniquement, decommentez la ligne suivante :
 # backports.zoneinfo

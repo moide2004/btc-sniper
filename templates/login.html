@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio — Connexion</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0e1117; color:#e6e6e6;
+           display:flex; min-height:100vh; align-items:center; justify-content:center; margin:0; }
+    .card { background:#161b22; padding:32px; border-radius:14px; width:300px;
+            box-shadow:0 8px 30px rgba(0,0,0,.4); }
+    h1 { font-size:18px; margin:0 0 18px; }
+    input { width:100%; padding:11px; box-sizing:border-box; border-radius:8px;
+            border:1px solid #30363d; background:#0e1117; color:#e6e6e6; }
+    button { width:100%; padding:11px; margin-top:14px; border:0; border-radius:8px;
+             background:#f7931a; color:#111; font-weight:600; cursor:pointer; }
+    .err { color:#ff6b6b; font-size:13px; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <form class="card" method="post">
+    <h1>🔒 Mon Portefeuille</h1>
+    <input type="password" name="password" placeholder="Mot de passe" autofocus>
+    <button type="submit">Se connecter</button>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  </form>
+</body>
+</html>

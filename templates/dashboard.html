@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mon Portefeuille</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0e1117; color:#e6e6e6;
+           margin:0; padding:0 16px 40px; }
+    .wrap { max-width:900px; margin:0 auto; }
+    header { display:flex; align-items:center; justify-content:space-between;
+             padding:20px 0; flex-wrap:wrap; gap:10px; }
+    .total { font-size:34px; font-weight:700; }
+    .sub { color:#8b949e; font-size:13px; }
+    a.btn { background:#f7931a; color:#111; text-decoration:none; padding:8px 14px;
+            border-radius:8px; font-weight:600; font-size:14px; }
+    a.logout { color:#8b949e; text-decoration:none; font-size:13px; margin-left:12px; }
+    .cards { display:flex; gap:12px; flex-wrap:wrap; margin:10px 0 24px; }
+    .pill { background:#161b22; border:1px solid #30363d; border-radius:10px;
+            padding:10px 14px; }
+    .pill b { display:block; font-size:16px; }
+    table { width:100%; border-collapse:collapse; background:#161b22; border-radius:12px;
+            overflow:hidden; }
+    th, td { padding:11px 14px; text-align:right; font-size:14px;
+             border-bottom:1px solid #21262d; }
+    th:first-child, td:first-child { text-align:left; }
+    th { color:#8b949e; font-weight:600; }
+    .src { color:#8b949e; font-size:12px; }
+    .err { background:#2d1417; border:1px solid #5c2a2f; color:#ffb3b8;
+           padding:10px 14px; border-radius:10px; margin-bottom:18px; font-size:13px; }
+    .muted { color:#8b949e; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="total">{{ "{:,.2f}".format(p.total_usd) }} {{ p.vs_currency|upper }}</div>
+      <div class="sub">Valeur totale · maj {{ p.updated }}</div>
+    </div>
+    <div>
+      <a class="btn" href="{{ url_for('index', refresh=1) }}">↻ Rafraîchir</a>
+      <a class="logout" href="{{ url_for('logout') }}">Déconnexion</a>
+    </div>
+  </header>
+
+  {% if p.errors %}
+    <div class="err">
+      ⚠️ Certaines sources n'ont pas répondu :
+      <ul style="margin:6px 0 0;">
+        {% for e in p.errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="cards">
+    {% for src, val in p.by_source.items() %}
+      <div class="pill"><span class="src">{{ src }}</span>
+        <b>{{ "{:,.2f}".format(val) }} {{ p.vs_currency|upper }}</b></div>
+    {% endfor %}
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Actif</th><th>Quantité</th><th>Prix</th><th>Valeur</th></tr>
+    </thead>
+    <tbody>
+      {% for h in p.holdings %}
+        <tr>
+          <td><b>{{ h.symbol }}</b> <span class="src">· {{ h.source }}</span></td>
+          <td>{{ "{:,.6f}".format(h.amount) }}</td>
+          <td>{% if h.price_usd %}{{ "{:,.4f}".format(h.price_usd) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{{ "{:,.2f}".format(h.value_usd) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted" style="text-align:center;">
+          Aucun avoir trouvé. Vérifie tes clés API / adresses dans .env.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="sub" style="margin-top:18px;">
+    Lecture seule · aucune clé privée n'est utilisée · prix via CoinGecko
+  </p>
+</div>
+</body>
+</html>
