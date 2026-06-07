@@ -16,6 +16,7 @@ from flask import (Flask, redirect, render_template, request, session, url_for)
 
 from portfolio import config
 from portfolio.aggregate import get_portfolio
+from portfolio.analysis import get_analysis
 from portfolio.markets import get_markets
 
 logging.basicConfig(level=logging.INFO,
@@ -64,7 +65,8 @@ def index():
     force = request.args.get("refresh") == "1"
     data = get_portfolio(force=force)
     markets = get_markets(force=force)
-    return render_template("dashboard.html", p=data, m=markets)
+    analysis = get_analysis(force=force)
+    return render_template("dashboard.html", p=data, m=markets, a=analysis)
 
 
 if __name__ == "__main__":

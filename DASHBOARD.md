@@ -5,13 +5,18 @@ la valeur totale en temps réel sur une page web protégée par mot de passe.
 
 ## Ce que montre le tableau de bord
 
-**1. Tes comptes (montant des portefeuilles)** — soldes via clé API lecture seule :
+**1. Analyse BTC Sniper** — le cerveau de ton bot, affiché à l'écran :
+score de conviction, direction (LONG/SHORT), structure 1W/1D/4H, RSI, funding,
+CVD, POC/VAH/VAL, et les niveaux **SL / TP1 / TP2** avec le ratio R/R.
+Si Bybit est bloqué, l'analyse bascule automatiquement sur Bitget.
+
+**2. Tes comptes (montant des portefeuilles)** — soldes via clé API lecture seule :
 
 | Source | Connexion | Ce qui est lu |
 |---|---|---|
 | **Bitget** / **Bybit** (et Binance) | Clé API **lecture seule** | Tous les soldes |
 
-**2. Données de marché en temps réel** — via endpoints **publics** (aucune clé) :
+**3. Données de marché en temps réel** — via endpoints **publics** (aucune clé) :
 
 | Donnée | Bybit | Bitget |
 |---|---|---|

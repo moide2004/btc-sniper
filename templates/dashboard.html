@@ -34,6 +34,21 @@
     .up { color:#3fb950; } .down { color:#f85149; }
     .bar { display:inline-block; height:8px; border-radius:4px; vertical-align:middle; }
     .market td, .market th { font-size:13px; }
+    .signal { background:#161b22; border:1px solid #30363d; border-radius:14px;
+              padding:18px 20px; margin:6px 0 8px; }
+    .sigtop { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    .badge { padding:5px 12px; border-radius:20px; font-weight:700; font-size:14px; }
+    .b-long { background:#0f2e1a; color:#3fb950; border:1px solid #238636; }
+    .b-short { background:#2d1417; color:#f85149; border:1px solid #b62324; }
+    .score { font-size:30px; font-weight:800; }
+    .conv { font-size:13px; color:#8b949e; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+            gap:10px; margin-top:14px; }
+    .cell { background:#0e1117; border:1px solid #21262d; border-radius:9px; padding:9px 12px; }
+    .cell .k { font-size:11px; color:#8b949e; text-transform:uppercase; }
+    .cell .v { font-size:15px; font-weight:600; margin-top:2px; }
+    .reasons { margin:12px 0 0; padding-left:18px; font-size:13px; color:#c9d1d9; }
+    .reasons li { margin:3px 0; }
   </style>
 </head>
 <body>
@@ -48,6 +63,39 @@
       <a class="logout" href="{{ url_for('logout') }}">Déconnexion</a>
     </div>
   </header>
+
+  <h2>🎯 Analyse BTC Sniper</h2>
+  {% if a.error %}
+    <div class="err">Analyse indisponible : {{ a.error }}</div>
+  {% else %}
+  <div class="signal">
+    <div class="sigtop">
+      <span class="badge {{ 'b-long' if a.direction == 'LONG' else 'b-short' }}">{{ a.direction }}</span>
+      <span class="score {{ 'up' if a.direction == 'LONG' else 'down' }}">{{ a.score }}%</span>
+      <span class="conv">{{ a.conviction }}
+        {% if a.has_signal %}· ✅ SIGNAL VALIDE{% else %}· en attente (seuil {{ a.min_score }}% / RR {{ a.min_rr }}){% endif %}
+        · source {{ a.source }}</span>
+    </div>
+
+    <div class="grid">
+      <div class="cell"><div class="k">Prix BTC</div><div class="v">{{ "{:,.0f}".format(a.price) }} $</div></div>
+      <div class="cell"><div class="k">Structure 1W / 1D / 4H</div><div class="v">{{ a.struct_1w }} · {{ a.struct_1d }} · {{ a.struct_4h }}</div></div>
+      <div class="cell"><div class="k">RSI 1W / 1D / 4H</div><div class="v">{{ a.rsi_1w or '—' }} · {{ a.rsi_1d or '—' }} · {{ a.rsi_4h or '—' }}</div></div>
+      <div class="cell"><div class="k">Funding</div><div class="v {{ 'up' if (a.funding or 0)>=0 else 'down' }}">{{ "{:+.4f}%".format(a.funding*100) }}</div></div>
+      <div class="cell"><div class="k">CVD 4H / 1D</div><div class="v">{{ a.cvd_4h }}{% if a.cvd_div_4h %} ({{ a.cvd_div_4h }}){% endif %} · {{ a.cvd_1d }}</div></div>
+      <div class="cell"><div class="k">POC / VAH / VAL</div><div class="v">{{ a.poc }} · {{ a.vah }} · {{ a.val }}</div></div>
+      <div class="cell"><div class="k">Stop Loss</div><div class="v down">{{ a.sl or '—' }} $</div></div>
+      <div class="cell"><div class="k">TP1 / TP2</div><div class="v up">{{ a.tp1 or '—' }} · {{ a.tp2 or '—' }} $</div></div>
+      <div class="cell"><div class="k">Risque / Récompense</div><div class="v">1:{{ a.rr if a.rr is not none else '—' }}</div></div>
+    </div>
+
+    {% if a.reasons %}
+      <ul class="reasons">
+        {% for r in a.reasons %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {% if p.errors %}
     <div class="err">
