@@ -1,0 +1,129 @@
+//@version=5
+// =============================================================================
+//  TRIPLE DIVERGENCE + THREE DRIVES + CHANDELIERS
+// -----------------------------------------------------------------------------
+//  Indicateur de CONFIRMATION, modules INDEPENDANTS (chacun pose son marqueur).
+//  Tout est dessine sur les bougies (overlay). Fonctionne sur le timeframe que
+//  tu regardes (scalp 15-30m comme swing 4h/1D/1W) : la divergence est propre a
+//  ce timeframe.
+//
+//  MODULES :
+//   1) Triple divergence / Three Drives : compte les divergences RSI<->prix
+//      successives (1, 2, 3...). A la 3e (reglable) -> signal fort BUY/SELL.
+//   2) Chandeliers : Avalement (engulfing), Marteau / Etoile filante,
+//      "4 cavaliers" (4 bougies meme couleur = continuation, projection 5e).
+//
+//  NB : pas de liquidations (TradingView ne fournit aucune donnee de
+//  liquidations a un indicateur Pine).
+// =============================================================================
+indicator("Triple Divergence + Three Drives + Chandeliers", shorttitle="3Div+3Drives",
+     overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ------------------------------- RÉGLAGES ------------------------------------
+gD = "Triple divergence / Three Drives"
+rsiLen = input.int(14, "Longueur RSI", minval=2, group=gD)
+lbL    = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
+lbR    = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
+drives = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
+showDiv = input.bool(true, "Afficher les divergences + lignes", group=gD)
+
+gC = "Chandeliers"
+useEngulf = input.bool(true,  "Avalement (engulfing)", group=gC)
+usePin    = input.bool(true,  "Marteau / Étoile filante", group=gC)
+pinRatio  = input.float(2.0,  "Mèche / corps minimum (pin bar)", minval=1.0, group=gC)
+use4      = input.bool(true,  "4 cavaliers (continuation)", group=gC)
+
+// ------------------------ RSI + DÉTECTION DIVERGENCES ------------------------
+r = ta.rsi(close, rsiLen)
+plF = not na(ta.pivotlow(r, lbL, lbR))    // creux de RSI confirme (il y a lbR barres)
+phF = not na(ta.pivothigh(r, lbL, lbR))   // sommet de RSI confirme
+
+// valeurs des pivots precedents (calculees a CHAQUE barre, pas dans un if)
+prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
+prevLow     = ta.valuewhen(plF, low[lbR], 1)
+prevLowBar  = ta.valuewhen(plF, bar_index - lbR, 1)
+prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
+prevHigh    = ta.valuewhen(phF, high[lbR], 1)
+prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
+
+// Divergence HAUSSIERE : prix fait un + bas plus bas, RSI un + bas plus haut
+bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow
+// Divergence BAISSIERE : prix fait un + haut plus haut, RSI un + haut plus bas
+bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh
+
+// ------------------------ COMPTEUR DE POUSSÉES (DRIVES) ----------------------
+var int bullDrives = 0
+var int bearDrives = 0
+if bullDiv
+    bullDrives += 1
+    bearDrives := 0
+if bearDiv
+    bearDrives += 1
+    bullDrives := 0
+
+tripleBuy  = bullDiv and bullDrives >= drives
+tripleSell = bearDiv and bearDrives >= drives
+
+// ------------------------------- DESSIN DIV. ---------------------------------
+if showDiv and bullDiv
+    line.new(int(prevLowBar), prevLow, bar_index - lbR, low[lbR], color=color.new(color.green, 0), width=1)
+    label.new(bar_index - lbR, low[lbR],
+         tripleBuy ? "TRIPLE\nBUY" : str.tostring(bullDrives),
+         style=label.style_label_up,
+         color = tripleBuy ? color.lime : color.new(color.green, 45),
+         textcolor = tripleBuy ? color.black : color.white,
+         size = tripleBuy ? size.normal : size.small)
+if showDiv and bearDiv
+    line.new(int(prevHighBar), prevHigh, bar_index - lbR, high[lbR], color=color.new(color.red, 0), width=1)
+    label.new(bar_index - lbR, high[lbR],
+         tripleSell ? "TRIPLE\nSELL" : str.tostring(bearDrives),
+         style=label.style_label_down,
+         color = tripleSell ? color.red : color.new(color.red, 45),
+         textcolor = color.white,
+         size = tripleSell ? size.normal : size.small)
+
+// remise a zero du compteur apres un signal fort
+if tripleBuy
+    bullDrives := 0
+if tripleSell
+    bearDrives := 0
+
+// ------------------------------ CHANDELIERS ----------------------------------
+bodyHi = math.max(open, close)
+bodyLo = math.min(open, close)
+body   = math.abs(close - open)
+upWick = high - bodyHi
+dnWick = bodyLo - low
+
+// Avalement
+bullEngulf = useEngulf and close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+bearEngulf = useEngulf and close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+plotshape(bullEngulf, "Avalement haussier", shape.labelup, location.belowbar, color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
+plotshape(bearEngulf, "Avalement baissier", shape.labeldown, location.abovebar, color.new(color.red, 0), text="ENG", textcolor=color.white, size=size.tiny)
+
+// Marteau / Etoile filante (pin bars)
+hammer = usePin and dnWick > body * pinRatio and upWick < body and body > 0
+star   = usePin and upWick > body * pinRatio and dnWick < body and body > 0
+plotshape(hammer, "Marteau", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.tiny)
+plotshape(star,   "Étoile filante", shape.triangledown, location.abovebar, color.new(color.orange, 0), size=size.tiny)
+
+// 4 cavaliers : 4 bougies meme couleur -> continuation, 5e ~ taille des 3 premieres
+green = close > open
+red   = close < open
+fourUp = use4 and green and green[1] and green[2] and green[3]
+fourDn = use4 and red   and red[1]   and red[2]   and red[3]
+sz3 = (high[3] - low[3]) + (high[2] - low[2]) + (high[1] - low[1])   // taille des 3 premieres
+if fourUp and not fourUp[1]
+    label.new(bar_index, high, "4C ↑ cont.", style=label.style_label_down, color=color.new(color.teal, 15), textcolor=color.white, size=size.small)
+    line.new(bar_index, close, bar_index + 1, close + sz3, color=color.teal, style=line.style_dashed, width=2)
+if fourDn and not fourDn[1]
+    label.new(bar_index, low, "4C ↓ cont.", style=label.style_label_up, color=color.new(color.maroon, 15), textcolor=color.white, size=size.small)
+    line.new(bar_index, close, bar_index + 1, close - sz3, color=color.maroon, style=line.style_dashed, width=2)
+
+// ------------------------------- ALERTES -------------------------------------
+alertcondition(tripleBuy,   "Triple divergence BUY",  "Triple divergence haussiere (Three Drives)")
+alertcondition(tripleSell,  "Triple divergence SELL", "Triple divergence baissiere (Three Drives)")
+alertcondition(bullEngulf,  "Avalement haussier",     "Bullish engulfing")
+alertcondition(bearEngulf,  "Avalement baissier",     "Bearish engulfing")
+alertcondition(fourUp,      "4 cavaliers haussier",   "4 bougies vertes - continuation haussiere")
+alertcondition(fourDn,      "4 cavaliers baissier",   "4 bougies rouges - continuation baissiere")
