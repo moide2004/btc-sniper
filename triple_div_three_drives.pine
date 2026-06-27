@@ -26,6 +26,9 @@ atrLen     = input.int(14, "Longueur ATR", minval=1, group=gC)
 minBodyATR = input.float(0.6, "Corps min (x ATR)", minval=0.0, step=0.1, group=gC)
 useEngulf  = input.bool(true,  "Avalement (engulfing)", group=gC)
 engulfMin  = input.float(0.8, "Avalement: corps min (x ATR)", minval=0.0, step=0.1, group=gC)
+useVol     = input.bool(true,  "Avalement: confirmer par le volume", group=gC)
+volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gC)
+volMult    = input.float(1.5, "Volume: x la moyenne pour valider", minval=0.1, step=0.1, group=gC)
 usePin     = input.bool(true,  "Marteau / Étoile filante", group=gC)
 pinRatio   = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
 pinCtx     = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
@@ -81,8 +84,9 @@ bodyLo = math.min(open, close)
 upWick = high - bodyHi
 dnWick = bodyLo - low
 signif = body >= atr * minBodyATR
-bullEngulf = useEngulf and confirmed and close > open and close[1] < open[1] and close > high[1] and body > atr * engulfMin and low <= ta.lowest(low, pinCtx)
-bearEngulf = useEngulf and confirmed and close < open and close[1] > open[1] and close < low[1] and body > atr * engulfMin and high >= ta.highest(high, pinCtx)
+volOK = not useVol or volume > ta.sma(volume, volLen) * volMult
+bullEngulf = useEngulf and confirmed and close > open and close[1] < open[1] and close > high[1] and body > atr * engulfMin and low <= ta.lowest(low, pinCtx) and volOK
+bearEngulf = useEngulf and confirmed and close < open and close[1] > open[1] and close < low[1] and body > atr * engulfMin and high >= ta.highest(high, pinCtx) and volOK
 plotshape(bullEngulf, title="Avalement haussier", style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
 plotshape(bearEngulf, title="Avalement baissier", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0),   text="ENG", textcolor=color.white, size=size.tiny)
 
