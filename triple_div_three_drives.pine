@@ -61,15 +61,16 @@ prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
 prevHigh    = ta.valuewhen(phF, high[lbR], 1)
 prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
 
-f_inRange(cond) =>
-    b = ta.barssince(cond == true)
-    divMin <= b and b <= divMax
+// Distance (en barres) jusqu'au pivot precedent, calculee en ligne (pas de
+// fonction multi-lignes -> aucun souci d'indentation au copier-coller).
+gapBull = ta.barssince(plF[1])
+gapBear = ta.barssince(phF[1])
 
 // Divergence HAUSSIERE : prix + bas plus bas, RSI + bas plus haut, distance OK,
-// et (option) la poussée part d'une zone survendue.
-bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and f_inRange(plF[1]) and (not useOBOS or prevRSIlow <= osLvl)
+// et (option) la poussee part d'une zone survendue.
+bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
 // Divergence BAISSIERE : miroir.
-bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and f_inRange(phF[1]) and (not useOBOS or prevRSIhigh >= obLvl)
+bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= divMin and gapBear <= divMax and (not useOBOS or prevRSIhigh >= obLvl)
 
 // ===================== COMPTEUR DE POUSSÉES (vraie structure) =================
 var int bullDrives = 0
