@@ -1,178 +1,132 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE / THREE DRIVES + CHANDELIERS  —  version calibrée (qualité)
-// -----------------------------------------------------------------------------
-//  Overlay, modules INDEPENDANTS. Conçu pour scalp comme swing : la divergence
-//  est calculée sur le timeframe affiché.
-//
-//  CALIBRAGE QUALITÉ :
-//   - Divergences filtrées : portée min/max entre pivots + filtre RSI OB/OS
-//     (une div. haussière ne compte que si elle part d'une zone survendue).
-//   - Vrai "Three Drives" : chaque poussée doit étendre la précédente (nouveau
-//     plus-bas / plus-haut) ET les 3 doivent tenir dans une fenêtre de temps.
-//   - Chandeliers filtrés par l'ATR (ignore le bruit) + contexte (extrême local
-//     pour les pin bars, gros corps pour l'avalement).
-//   - Tous les signaux sont confirmés à la CLÔTURE (pas de repaint intrabar).
-//
-//  NB : pas de liquidations (inaccessibles à un indicateur TradingView).
+//  TRIPLE DIVERGENCE / THREE DRIVES + CHANDELIERS — version 100% sans indentation
+//  (aucun bloc 'if', aucune fonction multi-lignes -> rien ne casse au coller).
+//  Overlay. Divergence calculee sur le timeframe affiche. Scalp comme swing.
+//  NB : pas de liquidations (inaccessibles a un indicateur TradingView).
 // =============================================================================
-indicator("Triple Div / Three Drives + Chandeliers [calibré]", shorttitle="3Drives+Bougies",
-     overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Triple Div / Three Drives + Chandeliers [calibré]", shorttitle="3Drives+Bougies", overlay=true, max_labels_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
 gD = "Divergence / Three Drives"
-rsiLen   = input.int(14, "Longueur RSI", minval=2, group=gD)
-lbL      = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
-lbR      = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
-divMin   = input.int(5,  "Distance min entre pivots (barres)", minval=1, group=gD)
-divMax   = input.int(60, "Distance max entre pivots (barres)", minval=2, group=gD)
-drives   = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
-drvWin   = input.int(150,"Fenêtre max des 3 poussées (barres)", minval=10, group=gD)
-useOBOS  = input.bool(true, "Filtre RSI survente/surachat", group=gD)
-osLvl    = input.int(40, "Seuil survente (div. haussière)", group=gD)
-obLvl    = input.int(60, "Seuil surachat (div. baissière)", group=gD)
+rsiLen     = input.int(14, "Longueur RSI", minval=2, group=gD)
+lbL        = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
+lbR        = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
+divMin     = input.int(5,  "Distance min entre pivots (barres)", minval=1, group=gD)
+divMax     = input.int(60, "Distance max entre pivots (barres)", minval=2, group=gD)
+drives     = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
+drvWin     = input.int(150,"Fenêtre max des poussées (barres)", minval=10, group=gD)
+useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
+osLvl      = input.int(40, "Seuil survente (div. haussière)", group=gD)
+obLvl      = input.int(60, "Seuil surachat (div. baissière)", group=gD)
 onlyTriple = input.bool(false, "Afficher SEULEMENT le signal triple", group=gD)
-showLines  = input.bool(true,  "Tracer les lignes de divergence", group=gD)
 
 gC = "Chandeliers (filtrés par ATR)"
-atrLen    = input.int(14, "Longueur ATR", minval=1, group=gC)
-minBodyATR= input.float(0.6, "Corps min (x ATR) — significativité", minval=0.0, step=0.1, group=gC)
-useEngulf = input.bool(true,  "Avalement (engulfing)", group=gC)
-usePin    = input.bool(true,  "Marteau / Étoile filante", group=gC)
-pinRatio  = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
-pinCtx    = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
-use4      = input.bool(true,  "4 cavaliers (continuation)", group=gC)
+atrLen     = input.int(14, "Longueur ATR", minval=1, group=gC)
+minBodyATR = input.float(0.6, "Corps min (x ATR)", minval=0.0, step=0.1, group=gC)
+useEngulf  = input.bool(true,  "Avalement (engulfing)", group=gC)
+usePin     = input.bool(true,  "Marteau / Étoile filante", group=gC)
+pinRatio   = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
+pinCtx     = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
+use4       = input.bool(true,  "4 cavaliers (continuation)", group=gC)
 
 gI = "Affichage"
-showPanel = input.bool(true, "Tableau d'état", group=gI)
+showPanel  = input.bool(true, "Tableau d'état", group=gI)
 
-confirmed = barstate.isconfirmed   // tout est validé à la clôture (anti-repaint)
+confirmed = barstate.isconfirmed
 atr = ta.atr(atrLen)
 
-// ===================== RSI + DÉTECTION DIVERGENCES (filtrées) =================
+// --------------------------- RSI + DIVERGENCES -------------------------------
 r = ta.rsi(close, rsiLen)
 plF = not na(ta.pivotlow(r, lbL, lbR))
 phF = not na(ta.pivothigh(r, lbL, lbR))
-
 prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
 prevLow     = ta.valuewhen(plF, low[lbR], 1)
-prevLowBar  = ta.valuewhen(plF, bar_index - lbR, 1)
 prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
 prevHigh    = ta.valuewhen(phF, high[lbR], 1)
-prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
-
-// Distance (en barres) jusqu'au pivot precedent, calculee en ligne (pas de
-// fonction multi-lignes -> aucun souci d'indentation au copier-coller).
 gapBull = ta.barssince(plF[1])
 gapBear = ta.barssince(phF[1])
-
-// Divergence HAUSSIERE : prix + bas plus bas, RSI + bas plus haut, distance OK,
-// et (option) la poussee part d'une zone survendue.
 bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
-// Divergence BAISSIERE : miroir.
 bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= divMin and gapBear <= divMax and (not useOBOS or prevRSIhigh >= obLvl)
 
-// ===================== COMPTEUR DE POUSSÉES (vraie structure) =================
+// ------------------ COMPTEUR DE POUSSÉES (sans bloc 'if') --------------------
 var int bullDrives = 0
 var int bearDrives = 0
 var int lastBullBar = na
 var int lastBearBar = na
+gapOkBull = not na(lastBullBar) and (bar_index - lastBullBar) <= drvWin
+gapOkBear = not na(lastBearBar) and (bar_index - lastBearBar) <= drvWin
+newBull = bullDiv ? (gapOkBull ? bullDrives + 1 : 1) : bullDrives
+newBear = bearDiv ? (gapOkBear ? bearDrives + 1 : 1) : bearDrives
+tripleBuy  = bullDiv and newBull >= drives
+tripleSell = bearDiv and newBear >= drives
+bullDrives := tripleBuy ? 0 : (bearDiv ? 0 : newBull)
+bearDrives := tripleSell ? 0 : (bullDiv ? 0 : newBear)
+lastBullBar := bullDiv ? bar_index : lastBullBar
+lastBearBar := bearDiv ? bar_index : lastBearBar
 
-if bullDiv
-    bullDrives := (not na(lastBullBar) and (bar_index - lastBullBar) <= drvWin) ? bullDrives + 1 : 1
-    bearDrives := 0
-    lastBullBar := bar_index
-if bearDiv
-    bearDrives := (not na(lastBearBar) and (bar_index - lastBearBar) <= drvWin) ? bearDrives + 1 : 1
-    bullDrives := 0
-    lastBearBar := bar_index
+// --------------------------- MARQUEURS DIVERGENCE ----------------------------
+minorBull = bullDiv and not tripleBuy and not onlyTriple
+minorBear = bearDiv and not tripleSell and not onlyTriple
+plotshape(minorBull, title="Divergence haussière", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny)
+plotshape(minorBear, title="Divergence baissière", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny)
+plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.lime, text="BUY",  textcolor=color.black, size=size.normal)
+plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.red,  text="SELL", textcolor=color.white, size=size.normal)
 
-tripleBuy  = bullDiv and bullDrives >= drives
-tripleSell = bearDiv and bearDrives >= drives
-
-// ------------------------------- DESSIN DIV. ---------------------------------
-drawBull = bullDiv and (not onlyTriple or tripleBuy)
-drawBear = bearDiv and (not onlyTriple or tripleSell)
-
-if drawBull
-    if showLines
-        line.new(int(prevLowBar), prevLow, bar_index - lbR, low[lbR], color=color.new(color.green, 0), width=1)
-    label.new(bar_index - lbR, low[lbR], tripleBuy ? "▲ TRIPLE BUY" : str.tostring(bullDrives),
-         style=label.style_label_up,
-         color = tripleBuy ? color.lime : color.new(color.green, 45),
-         textcolor = tripleBuy ? color.black : color.white,
-         size = tripleBuy ? size.large : size.small)
-if drawBear
-    if showLines
-        line.new(int(prevHighBar), prevHigh, bar_index - lbR, high[lbR], color=color.new(color.red, 0), width=1)
-    label.new(bar_index - lbR, high[lbR], tripleSell ? "▼ TRIPLE SELL" : str.tostring(bearDrives),
-         style=label.style_label_down,
-         color = tripleSell ? color.red : color.new(color.red, 45),
-         textcolor = color.white,
-         size = tripleSell ? size.large : size.small)
-
-if tripleBuy
-    bullDrives := 0
-if tripleSell
-    bearDrives := 0
-
-// ============================ CHANDELIERS (filtrés) ==========================
+// ------------------------------ CHANDELIERS ----------------------------------
 body   = math.abs(close - open)
 bodyHi = math.max(open, close)
 bodyLo = math.min(open, close)
 upWick = high - bodyHi
 dnWick = bodyLo - low
-signif = body >= atr * minBodyATR          // corps significatif (anti-bruit)
-
-// Avalement : corps qui avale le precedent, significatif, et confirme.
+signif = body >= atr * minBodyATR
 bullEngulf = useEngulf and confirmed and signif and close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
 bearEngulf = useEngulf and confirmed and signif and close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
-plotshape(bullEngulf, "Avalement haussier", shape.labelup, location.belowbar, color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
-plotshape(bearEngulf, "Avalement baissier", shape.labeldown, location.abovebar, color.new(color.red, 0), text="ENG", textcolor=color.white, size=size.tiny)
+plotshape(bullEngulf, title="Avalement haussier", style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
+plotshape(bearEngulf, title="Avalement baissier", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0),   text="ENG", textcolor=color.white, size=size.tiny)
 
-// Pin bars : vrai rejet (meche >> corps), bougie significative, A UN EXTREME local.
 atLow  = low  <= ta.lowest(low,  pinCtx)
 atHigh = high >= ta.highest(high, pinCtx)
 hammer = usePin and confirmed and (high - low) >= atr and dnWick > body * pinRatio and upWick < body and atLow
 star   = usePin and confirmed and (high - low) >= atr and upWick > body * pinRatio and dnWick < body and atHigh
-plotshape(hammer, "Marteau", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.tiny)
-plotshape(star,   "Étoile filante", shape.triangledown, location.abovebar, color.new(color.orange, 0), size=size.tiny)
+plotshape(hammer, title="Marteau", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny)
+plotshape(star,   title="Étoile filante", style=shape.triangledown, location=location.abovebar, color=color.new(color.orange, 0), size=size.tiny)
 
-// 4 cavaliers : 4 bougies meme couleur (corps reels) -> continuation, 5e ~ 3 premieres.
-realBody(i) => math.abs(close[i] - open[i]) >= atr * 0.3
-green = close > open and realBody(0)
-red   = close < open and realBody(0)
-fourUp = use4 and confirmed and green and (close[1] > open[1] and realBody(1)) and (close[2] > open[2] and realBody(2)) and (close[3] > open[3] and realBody(3))
-fourDn = use4 and confirmed and red   and (close[1] < open[1] and realBody(1)) and (close[2] < open[2] and realBody(2)) and (close[3] < open[3] and realBody(3))
-sz3 = (high[3] - low[3]) + (high[2] - low[2]) + (high[1] - low[1])
-if fourUp and not fourUp[1]
-    label.new(bar_index, high, "4C ↑ cont.", style=label.style_label_down, color=color.new(color.teal, 15), textcolor=color.white, size=size.small)
-    line.new(bar_index, close, bar_index + 1, close + sz3, color=color.teal, style=line.style_dashed, width=2)
-if fourDn and not fourDn[1]
-    label.new(bar_index, low, "4C ↓ cont.", style=label.style_label_up, color=color.new(color.maroon, 15), textcolor=color.white, size=size.small)
-    line.new(bar_index, close, bar_index + 1, close - sz3, color=color.maroon, style=line.style_dashed, width=2)
+g1 = close > open and body >= atr * 0.3
+g2 = close[1] > open[1] and math.abs(close[1]-open[1]) >= atr * 0.3
+g3 = close[2] > open[2] and math.abs(close[2]-open[2]) >= atr * 0.3
+g4 = close[3] > open[3] and math.abs(close[3]-open[3]) >= atr * 0.3
+r1 = close < open and body >= atr * 0.3
+r2 = close[1] < open[1] and math.abs(close[1]-open[1]) >= atr * 0.3
+r3 = close[2] < open[2] and math.abs(close[2]-open[2]) >= atr * 0.3
+r4 = close[3] < open[3] and math.abs(close[3]-open[3]) >= atr * 0.3
+fourUp = use4 and confirmed and g1 and g2 and g3 and g4
+fourDn = use4 and confirmed and r1 and r2 and r3 and r4
+plotshape(fourUp and not fourUp[1], title="4 cavaliers haussier", style=shape.labeldown, location=location.abovebar, color=color.new(color.teal, 15), text="4C", textcolor=color.white, size=size.tiny)
+plotshape(fourDn and not fourDn[1], title="4 cavaliers baissier", style=shape.labelup,   location=location.belowbar, color=color.new(color.maroon, 15), text="4C", textcolor=color.white, size=size.tiny)
 
-// ================================ TABLEAU ====================================
+// ------------------------ TABLEAU (sans bloc 'if') ---------------------------
+bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
+bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
+rcol = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white
 var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.new(color.gray, 50), frame_width=1)
-if showPanel and barstate.islast
-    bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
-    bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
-    table.cell(t, 0, 0, "RSI",         text_color=color.white, bgcolor=color.new(color.gray, 30))
-    table.cell(t, 1, 0, str.tostring(r, "0"), text_color = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white)
-    table.cell(t, 0, 1, "Poussées ▲",  text_color=color.white)
-    table.cell(t, 1, 1, str.tostring(bullDrives) + " / " + str.tostring(drives), text_color=color.green)
-    table.cell(t, 0, 2, "Poussées ▼",  text_color=color.white)
-    table.cell(t, 1, 2, str.tostring(bearDrives) + " / " + str.tostring(drives), text_color=color.red)
-    table.cell(t, 0, 3, "Biais",       text_color=color.white)
-    table.cell(t, 1, 3, bias, text_color=color.white, bgcolor=color.new(bcol, 40))
+tShow = showPanel and barstate.islast
+table.cell(t, 0, 0, tShow ? "RSI" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 30) : color.new(color.gray, 100))
+table.cell(t, 1, 0, tShow ? str.tostring(r, "0") : "", text_color=rcol)
+table.cell(t, 0, 1, tShow ? "Poussées haussières" : "", text_color=color.white)
+table.cell(t, 1, 1, tShow ? str.tostring(bullDrives) + " / " + str.tostring(drives) : "", text_color=color.green)
+table.cell(t, 0, 2, tShow ? "Poussées baissières" : "", text_color=color.white)
+table.cell(t, 1, 2, tShow ? str.tostring(bearDrives) + " / " + str.tostring(drives) : "", text_color=color.red)
+table.cell(t, 0, 3, tShow ? "Biais" : "", text_color=color.white)
+table.cell(t, 1, 3, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
 
-// ================================ ALERTES ====================================
-alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere (Three Drives) confirmee")
-alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere (Three Drives) confirmee")
+// -------------------------------- ALERTES ------------------------------------
+alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
+alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
 alertcondition(bullDiv,    "Divergence haussière",   "Divergence RSI haussiere")
 alertcondition(bearDiv,    "Divergence baissière",   "Divergence RSI baissiere")
-alertcondition(bullEngulf, "Avalement haussier",     "Bullish engulfing significatif")
-alertcondition(bearEngulf, "Avalement baissier",     "Bearish engulfing significatif")
+alertcondition(bullEngulf, "Avalement haussier",     "Bullish engulfing")
+alertcondition(bearEngulf, "Avalement baissier",     "Bearish engulfing")
 alertcondition(hammer,     "Marteau",                "Marteau a un creux local")
 alertcondition(star,       "Étoile filante",         "Etoile filante a un sommet local")
 alertcondition(fourUp,     "4 cavaliers haussier",   "4 bougies vertes - continuation")
