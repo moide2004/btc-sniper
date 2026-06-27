@@ -1,44 +1,59 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE + THREE DRIVES + CHANDELIERS
+//  TRIPLE DIVERGENCE / THREE DRIVES + CHANDELIERS  —  version calibrée (qualité)
 // -----------------------------------------------------------------------------
-//  Indicateur de CONFIRMATION, modules INDEPENDANTS (chacun pose son marqueur).
-//  Tout est dessine sur les bougies (overlay). Fonctionne sur le timeframe que
-//  tu regardes (scalp 15-30m comme swing 4h/1D/1W) : la divergence est propre a
-//  ce timeframe.
+//  Overlay, modules INDEPENDANTS. Conçu pour scalp comme swing : la divergence
+//  est calculée sur le timeframe affiché.
 //
-//  MODULES :
-//   1) Triple divergence / Three Drives : compte les divergences RSI<->prix
-//      successives (1, 2, 3...). A la 3e (reglable) -> signal fort BUY/SELL.
-//   2) Chandeliers : Avalement (engulfing), Marteau / Etoile filante,
-//      "4 cavaliers" (4 bougies meme couleur = continuation, projection 5e).
+//  CALIBRAGE QUALITÉ :
+//   - Divergences filtrées : portée min/max entre pivots + filtre RSI OB/OS
+//     (une div. haussière ne compte que si elle part d'une zone survendue).
+//   - Vrai "Three Drives" : chaque poussée doit étendre la précédente (nouveau
+//     plus-bas / plus-haut) ET les 3 doivent tenir dans une fenêtre de temps.
+//   - Chandeliers filtrés par l'ATR (ignore le bruit) + contexte (extrême local
+//     pour les pin bars, gros corps pour l'avalement).
+//   - Tous les signaux sont confirmés à la CLÔTURE (pas de repaint intrabar).
 //
-//  NB : pas de liquidations (TradingView ne fournit aucune donnee de
-//  liquidations a un indicateur Pine).
+//  NB : pas de liquidations (inaccessibles à un indicateur TradingView).
 // =============================================================================
-indicator("Triple Divergence + Three Drives + Chandeliers", shorttitle="3Div+3Drives",
+indicator("Triple Div / Three Drives + Chandeliers [calibré]", shorttitle="3Drives+Bougies",
      overlay=true, max_labels_count=500, max_lines_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
-gD = "Triple divergence / Three Drives"
-rsiLen = input.int(14, "Longueur RSI", minval=2, group=gD)
-lbL    = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
-lbR    = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
-drives = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
-showDiv = input.bool(true, "Afficher les divergences + lignes", group=gD)
+gD = "Divergence / Three Drives"
+rsiLen   = input.int(14, "Longueur RSI", minval=2, group=gD)
+lbL      = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
+lbR      = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
+divMin   = input.int(5,  "Distance min entre pivots (barres)", minval=1, group=gD)
+divMax   = input.int(60, "Distance max entre pivots (barres)", minval=2, group=gD)
+drives   = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
+drvWin   = input.int(150,"Fenêtre max des 3 poussées (barres)", minval=10, group=gD)
+useOBOS  = input.bool(true, "Filtre RSI survente/surachat", group=gD)
+osLvl    = input.int(40, "Seuil survente (div. haussière)", group=gD)
+obLvl    = input.int(60, "Seuil surachat (div. baissière)", group=gD)
+onlyTriple = input.bool(false, "Afficher SEULEMENT le signal triple", group=gD)
+showLines  = input.bool(true,  "Tracer les lignes de divergence", group=gD)
 
-gC = "Chandeliers"
+gC = "Chandeliers (filtrés par ATR)"
+atrLen    = input.int(14, "Longueur ATR", minval=1, group=gC)
+minBodyATR= input.float(0.6, "Corps min (x ATR) — significativité", minval=0.0, step=0.1, group=gC)
 useEngulf = input.bool(true,  "Avalement (engulfing)", group=gC)
 usePin    = input.bool(true,  "Marteau / Étoile filante", group=gC)
-pinRatio  = input.float(2.0,  "Mèche / corps minimum (pin bar)", minval=1.0, group=gC)
+pinRatio  = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
+pinCtx    = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
 use4      = input.bool(true,  "4 cavaliers (continuation)", group=gC)
 
-// ------------------------ RSI + DÉTECTION DIVERGENCES ------------------------
-r = ta.rsi(close, rsiLen)
-plF = not na(ta.pivotlow(r, lbL, lbR))    // creux de RSI confirme (il y a lbR barres)
-phF = not na(ta.pivothigh(r, lbL, lbR))   // sommet de RSI confirme
+gI = "Affichage"
+showPanel = input.bool(true, "Tableau d'état", group=gI)
 
-// valeurs des pivots precedents (calculees a CHAQUE barre, pas dans un if)
+confirmed = barstate.isconfirmed   // tout est validé à la clôture (anti-repaint)
+atr = ta.atr(atrLen)
+
+// ===================== RSI + DÉTECTION DIVERGENCES (filtrées) =================
+r = ta.rsi(close, rsiLen)
+plF = not na(ta.pivotlow(r, lbL, lbR))
+phF = not na(ta.pivothigh(r, lbL, lbR))
+
 prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
 prevLow     = ta.valuewhen(plF, low[lbR], 1)
 prevLowBar  = ta.valuewhen(plF, bar_index - lbR, 1)
@@ -46,73 +61,89 @@ prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
 prevHigh    = ta.valuewhen(phF, high[lbR], 1)
 prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
 
-// Divergence HAUSSIERE : prix fait un + bas plus bas, RSI un + bas plus haut
-bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow
-// Divergence BAISSIERE : prix fait un + haut plus haut, RSI un + haut plus bas
-bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh
+f_inRange(cond) =>
+    b = ta.barssince(cond == true)
+    divMin <= b and b <= divMax
 
-// ------------------------ COMPTEUR DE POUSSÉES (DRIVES) ----------------------
+// Divergence HAUSSIERE : prix + bas plus bas, RSI + bas plus haut, distance OK,
+// et (option) la poussée part d'une zone survendue.
+bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and f_inRange(plF[1]) and (not useOBOS or prevRSIlow <= osLvl)
+// Divergence BAISSIERE : miroir.
+bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and f_inRange(phF[1]) and (not useOBOS or prevRSIhigh >= obLvl)
+
+// ===================== COMPTEUR DE POUSSÉES (vraie structure) =================
 var int bullDrives = 0
 var int bearDrives = 0
+var int lastBullBar = na
+var int lastBearBar = na
+
 if bullDiv
-    bullDrives += 1
+    bullDrives := (not na(lastBullBar) and (bar_index - lastBullBar) <= drvWin) ? bullDrives + 1 : 1
     bearDrives := 0
+    lastBullBar := bar_index
 if bearDiv
-    bearDrives += 1
+    bearDrives := (not na(lastBearBar) and (bar_index - lastBearBar) <= drvWin) ? bearDrives + 1 : 1
     bullDrives := 0
+    lastBearBar := bar_index
 
 tripleBuy  = bullDiv and bullDrives >= drives
 tripleSell = bearDiv and bearDrives >= drives
 
 // ------------------------------- DESSIN DIV. ---------------------------------
-if showDiv and bullDiv
-    line.new(int(prevLowBar), prevLow, bar_index - lbR, low[lbR], color=color.new(color.green, 0), width=1)
-    label.new(bar_index - lbR, low[lbR],
-         tripleBuy ? "TRIPLE\nBUY" : str.tostring(bullDrives),
+drawBull = bullDiv and (not onlyTriple or tripleBuy)
+drawBear = bearDiv and (not onlyTriple or tripleSell)
+
+if drawBull
+    if showLines
+        line.new(int(prevLowBar), prevLow, bar_index - lbR, low[lbR], color=color.new(color.green, 0), width=1)
+    label.new(bar_index - lbR, low[lbR], tripleBuy ? "▲ TRIPLE BUY" : str.tostring(bullDrives),
          style=label.style_label_up,
          color = tripleBuy ? color.lime : color.new(color.green, 45),
          textcolor = tripleBuy ? color.black : color.white,
-         size = tripleBuy ? size.normal : size.small)
-if showDiv and bearDiv
-    line.new(int(prevHighBar), prevHigh, bar_index - lbR, high[lbR], color=color.new(color.red, 0), width=1)
-    label.new(bar_index - lbR, high[lbR],
-         tripleSell ? "TRIPLE\nSELL" : str.tostring(bearDrives),
+         size = tripleBuy ? size.large : size.small)
+if drawBear
+    if showLines
+        line.new(int(prevHighBar), prevHigh, bar_index - lbR, high[lbR], color=color.new(color.red, 0), width=1)
+    label.new(bar_index - lbR, high[lbR], tripleSell ? "▼ TRIPLE SELL" : str.tostring(bearDrives),
          style=label.style_label_down,
          color = tripleSell ? color.red : color.new(color.red, 45),
          textcolor = color.white,
-         size = tripleSell ? size.normal : size.small)
+         size = tripleSell ? size.large : size.small)
 
-// remise a zero du compteur apres un signal fort
 if tripleBuy
     bullDrives := 0
 if tripleSell
     bearDrives := 0
 
-// ------------------------------ CHANDELIERS ----------------------------------
+// ============================ CHANDELIERS (filtrés) ==========================
+body   = math.abs(close - open)
 bodyHi = math.max(open, close)
 bodyLo = math.min(open, close)
-body   = math.abs(close - open)
 upWick = high - bodyHi
 dnWick = bodyLo - low
+signif = body >= atr * minBodyATR          // corps significatif (anti-bruit)
 
-// Avalement
-bullEngulf = useEngulf and close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
-bearEngulf = useEngulf and close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+// Avalement : corps qui avale le precedent, significatif, et confirme.
+bullEngulf = useEngulf and confirmed and signif and close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+bearEngulf = useEngulf and confirmed and signif and close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
 plotshape(bullEngulf, "Avalement haussier", shape.labelup, location.belowbar, color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
 plotshape(bearEngulf, "Avalement baissier", shape.labeldown, location.abovebar, color.new(color.red, 0), text="ENG", textcolor=color.white, size=size.tiny)
 
-// Marteau / Etoile filante (pin bars)
-hammer = usePin and dnWick > body * pinRatio and upWick < body and body > 0
-star   = usePin and upWick > body * pinRatio and dnWick < body and body > 0
+// Pin bars : vrai rejet (meche >> corps), bougie significative, A UN EXTREME local.
+atLow  = low  <= ta.lowest(low,  pinCtx)
+atHigh = high >= ta.highest(high, pinCtx)
+hammer = usePin and confirmed and (high - low) >= atr and dnWick > body * pinRatio and upWick < body and atLow
+star   = usePin and confirmed and (high - low) >= atr and upWick > body * pinRatio and dnWick < body and atHigh
 plotshape(hammer, "Marteau", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.tiny)
 plotshape(star,   "Étoile filante", shape.triangledown, location.abovebar, color.new(color.orange, 0), size=size.tiny)
 
-// 4 cavaliers : 4 bougies meme couleur -> continuation, 5e ~ taille des 3 premieres
-green = close > open
-red   = close < open
-fourUp = use4 and green and green[1] and green[2] and green[3]
-fourDn = use4 and red   and red[1]   and red[2]   and red[3]
-sz3 = (high[3] - low[3]) + (high[2] - low[2]) + (high[1] - low[1])   // taille des 3 premieres
+// 4 cavaliers : 4 bougies meme couleur (corps reels) -> continuation, 5e ~ 3 premieres.
+realBody(i) => math.abs(close[i] - open[i]) >= atr * 0.3
+green = close > open and realBody(0)
+red   = close < open and realBody(0)
+fourUp = use4 and confirmed and green and (close[1] > open[1] and realBody(1)) and (close[2] > open[2] and realBody(2)) and (close[3] > open[3] and realBody(3))
+fourDn = use4 and confirmed and red   and (close[1] < open[1] and realBody(1)) and (close[2] < open[2] and realBody(2)) and (close[3] < open[3] and realBody(3))
+sz3 = (high[3] - low[3]) + (high[2] - low[2]) + (high[1] - low[1])
 if fourUp and not fourUp[1]
     label.new(bar_index, high, "4C ↑ cont.", style=label.style_label_down, color=color.new(color.teal, 15), textcolor=color.white, size=size.small)
     line.new(bar_index, close, bar_index + 1, close + sz3, color=color.teal, style=line.style_dashed, width=2)
@@ -120,10 +151,28 @@ if fourDn and not fourDn[1]
     label.new(bar_index, low, "4C ↓ cont.", style=label.style_label_up, color=color.new(color.maroon, 15), textcolor=color.white, size=size.small)
     line.new(bar_index, close, bar_index + 1, close - sz3, color=color.maroon, style=line.style_dashed, width=2)
 
-// ------------------------------- ALERTES -------------------------------------
-alertcondition(tripleBuy,   "Triple divergence BUY",  "Triple divergence haussiere (Three Drives)")
-alertcondition(tripleSell,  "Triple divergence SELL", "Triple divergence baissiere (Three Drives)")
-alertcondition(bullEngulf,  "Avalement haussier",     "Bullish engulfing")
-alertcondition(bearEngulf,  "Avalement baissier",     "Bearish engulfing")
-alertcondition(fourUp,      "4 cavaliers haussier",   "4 bougies vertes - continuation haussiere")
-alertcondition(fourDn,      "4 cavaliers baissier",   "4 bougies rouges - continuation baissiere")
+// ================================ TABLEAU ====================================
+var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.new(color.gray, 50), frame_width=1)
+if showPanel and barstate.islast
+    bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
+    bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
+    table.cell(t, 0, 0, "RSI",         text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(t, 1, 0, str.tostring(r, "0"), text_color = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white)
+    table.cell(t, 0, 1, "Poussées ▲",  text_color=color.white)
+    table.cell(t, 1, 1, str.tostring(bullDrives) + " / " + str.tostring(drives), text_color=color.green)
+    table.cell(t, 0, 2, "Poussées ▼",  text_color=color.white)
+    table.cell(t, 1, 2, str.tostring(bearDrives) + " / " + str.tostring(drives), text_color=color.red)
+    table.cell(t, 0, 3, "Biais",       text_color=color.white)
+    table.cell(t, 1, 3, bias, text_color=color.white, bgcolor=color.new(bcol, 40))
+
+// ================================ ALERTES ====================================
+alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere (Three Drives) confirmee")
+alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere (Three Drives) confirmee")
+alertcondition(bullDiv,    "Divergence haussière",   "Divergence RSI haussiere")
+alertcondition(bearDiv,    "Divergence baissière",   "Divergence RSI baissiere")
+alertcondition(bullEngulf, "Avalement haussier",     "Bullish engulfing significatif")
+alertcondition(bearEngulf, "Avalement baissier",     "Bearish engulfing significatif")
+alertcondition(hammer,     "Marteau",                "Marteau a un creux local")
+alertcondition(star,       "Étoile filante",         "Etoile filante a un sommet local")
+alertcondition(fourUp,     "4 cavaliers haussier",   "4 bougies vertes - continuation")
+alertcondition(fourDn,     "4 cavaliers baissier",   "4 bougies rouges - continuation")
