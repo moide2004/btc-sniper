@@ -98,10 +98,12 @@ if shortSig and canShort and strategy.position_size == 0
 var float eAtr = na
 opened = strategy.position_size != 0 and (na(strategy.position_size[1]) or strategy.position_size[1] == 0)
 eAtr := opened ? atr : eAtr
-slL = strategy.position_avg_price - eAtr * slMult
-tpL = strategy.position_avg_price + eAtr * tpMult
-slS = strategy.position_avg_price + eAtr * slMult
-tpS = strategy.position_avg_price - eAtr * tpMult
+pap = nz(strategy.position_avg_price, close)
+ea  = nz(eAtr, atr)
+slL = pap - ea * slMult
+tpL = pap + ea * tpMult
+slS = pap + ea * slMult
+tpS = pap - ea * tpMult
 strategy.exit("SortieL", "Long",  stop=slL, limit=tpL)
 strategy.exit("SortieS", "Short", stop=slS, limit=tpS)
 
