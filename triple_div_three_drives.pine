@@ -32,7 +32,6 @@ volMult    = input.float(1.5, "Volume: x la moyenne pour valider", minval=0.1, s
 usePin     = input.bool(true,  "Marteau / Étoile filante", group=gC)
 pinRatio   = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
 pinCtx     = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
-use4       = input.bool(true,  "4 cavaliers (continuation)", group=gC)
 
 gI = "Affichage"
 showPanel  = input.bool(true, "Tableau d'état", group=gI)
@@ -97,18 +96,6 @@ star   = usePin and confirmed and (high - low) >= atr and upWick > body * pinRat
 plotshape(hammer, title="Marteau", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny)
 plotshape(star,   title="Étoile filante", style=shape.triangledown, location=location.abovebar, color=color.new(color.orange, 0), size=size.tiny)
 
-g1 = close > open and body >= atr * 0.3
-g2 = close[1] > open[1] and math.abs(close[1]-open[1]) >= atr * 0.3
-g3 = close[2] > open[2] and math.abs(close[2]-open[2]) >= atr * 0.3
-g4 = close[3] > open[3] and math.abs(close[3]-open[3]) >= atr * 0.3
-r1 = close < open and body >= atr * 0.3
-r2 = close[1] < open[1] and math.abs(close[1]-open[1]) >= atr * 0.3
-r3 = close[2] < open[2] and math.abs(close[2]-open[2]) >= atr * 0.3
-r4 = close[3] < open[3] and math.abs(close[3]-open[3]) >= atr * 0.3
-fourUp = use4 and confirmed and g1 and g2 and g3 and g4
-fourDn = use4 and confirmed and r1 and r2 and r3 and r4
-plotshape(fourUp and not fourUp[1], title="4 cavaliers haussier", style=shape.labeldown, location=location.abovebar, color=color.new(color.teal, 15), text="4C", textcolor=color.white, size=size.tiny)
-plotshape(fourDn and not fourDn[1], title="4 cavaliers baissier", style=shape.labelup,   location=location.belowbar, color=color.new(color.maroon, 15), text="4C", textcolor=color.white, size=size.tiny)
 
 // ------------------------ TABLEAU (sans bloc 'if') ---------------------------
 bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
@@ -134,5 +121,3 @@ alertcondition(bullEngulf, "Avalement haussier",     "Bullish engulfing")
 alertcondition(bearEngulf, "Avalement baissier",     "Bearish engulfing")
 alertcondition(hammer,     "Marteau",                "Marteau a un creux local")
 alertcondition(star,       "Étoile filante",         "Etoile filante a un sommet local")
-alertcondition(fourUp,     "4 cavaliers haussier",   "4 bougies vertes - continuation")
-alertcondition(fourDn,     "4 cavaliers baissier",   "4 bougies rouges - continuation")

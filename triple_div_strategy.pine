@@ -1,0 +1,110 @@
+//@version=5
+// =============================================================================
+//  BACKTEST — Triple Divergence / Three Drives + Avalement + Pin bars
+//  Version STRATEGIE : ajoute-la au graphe puis ouvre l'onglet "Strategy Tester"
+//  pour voir win rate, profit factor, profit net, drawdown.
+//  (Un seul bloc 'if' minimal pour les entrees ; le reste est a plat.)
+//  NB : un backtest = historique, indicatif, PAS une garantie. Regarde surtout
+//  le Profit Factor et le Drawdown, pas seulement le win rate.
+// =============================================================================
+strategy("Backtest 3Drives + Chandeliers", shorttitle="3Drives BT", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.05, slippage=1, pyramiding=0, process_orders_on_close=true)
+
+// ------------------------------- STRATÉGIE -----------------------------------
+gS = "Stratégie (entrées / sorties)"
+dir       = input.string("Les deux", "Sens autorisé", options=["Les deux","Long seulement","Short seulement"], group=gS)
+entTriple = input.bool(true,  "Entrée sur Triple divergence", group=gS)
+entDiv    = input.bool(false, "Entrée sur Divergence simple", group=gS)
+entEngulf = input.bool(true,  "Entrée sur Avalement", group=gS)
+entPin    = input.bool(true,  "Entrée sur Marteau / Étoile", group=gS)
+slMult    = input.float(1.5, "Stop-loss (x ATR)",  minval=0.1, step=0.1, group=gS)
+tpMult    = input.float(2.5, "Take-profit (x ATR)", minval=0.1, step=0.1, group=gS)
+
+// ----------------------------- PARAMS SIGNAUX --------------------------------
+gD = "Divergence / Three Drives"
+rsiLen     = input.int(14, "Longueur RSI", minval=2, group=gD)
+lbL        = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
+lbR        = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
+divMin     = input.int(5,  "Distance min entre pivots", minval=1, group=gD)
+divMax     = input.int(60, "Distance max entre pivots", minval=2, group=gD)
+drives     = input.int(3,  "Poussées pour le triple", minval=2, maxval=6, group=gD)
+drvWin     = input.int(150,"Fenêtre max des poussées", minval=10, group=gD)
+useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
+osLvl      = input.int(40, "Seuil survente", group=gD)
+obLvl      = input.int(60, "Seuil surachat", group=gD)
+
+gC = "Chandeliers"
+atrLen     = input.int(14, "Longueur ATR", minval=1, group=gC)
+engulfMin  = input.float(0.8, "Avalement: corps min (x ATR)", minval=0.0, step=0.1, group=gC)
+useVol     = input.bool(true,  "Avalement: confirmer par le volume", group=gC)
+volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gC)
+volMult    = input.float(1.5, "Volume: x la moyenne", minval=0.1, step=0.1, group=gC)
+pinRatio   = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
+pinCtx     = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
+
+confirmed = barstate.isconfirmed
+atr = ta.atr(atrLen)
+
+// --------------------------- RSI + DIVERGENCES -------------------------------
+r = ta.rsi(close, rsiLen)
+plF = not na(ta.pivotlow(r, lbL, lbR))
+phF = not na(ta.pivothigh(r, lbL, lbR))
+prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
+prevLow     = ta.valuewhen(plF, low[lbR], 1)
+prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
+prevHigh    = ta.valuewhen(phF, high[lbR], 1)
+gapBull = ta.barssince(plF[1])
+gapBear = ta.barssince(phF[1])
+bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
+bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= divMin and gapBear <= divMax and (not useOBOS or prevRSIhigh >= obLvl)
+
+var int bullDrives = 0
+var int bearDrives = 0
+var int lastBullBar = na
+var int lastBearBar = na
+gapOkBull = not na(lastBullBar) and (bar_index - lastBullBar) <= drvWin
+gapOkBear = not na(lastBearBar) and (bar_index - lastBearBar) <= drvWin
+newBull = bullDiv ? (gapOkBull ? bullDrives + 1 : 1) : bullDrives
+newBear = bearDiv ? (gapOkBear ? bearDrives + 1 : 1) : bearDrives
+tripleBuy  = bullDiv and newBull >= drives
+tripleSell = bearDiv and newBear >= drives
+bullDrives := tripleBuy ? 0 : (bearDiv ? 0 : newBull)
+bearDrives := tripleSell ? 0 : (bullDiv ? 0 : newBear)
+lastBullBar := bullDiv ? bar_index : lastBullBar
+lastBearBar := bearDiv ? bar_index : lastBearBar
+
+// ------------------------------ CHANDELIERS ----------------------------------
+body   = math.abs(close - open)
+upWick = high - math.max(open, close)
+dnWick = math.min(open, close) - low
+volOK = not useVol or volume > ta.sma(volume, volLen) * volMult
+bullEngulf = confirmed and close > open and close[1] < open[1] and close > high[1] and body > atr * engulfMin and low <= ta.lowest(low, pinCtx) and volOK
+bearEngulf = confirmed and close < open and close[1] > open[1] and close < low[1] and body > atr * engulfMin and high >= ta.highest(high, pinCtx) and volOK
+hammer = confirmed and (high - low) >= atr and dnWick > body * pinRatio and upWick < body and low <= ta.lowest(low, pinCtx)
+star   = confirmed and (high - low) >= atr and upWick > body * pinRatio and dnWick < body and high >= ta.highest(high, pinCtx)
+
+// ------------------------- SIGNAUX D'ENTRÉE ----------------------------------
+longSig  = (entTriple and tripleBuy)  or (entDiv and bullDiv)  or (entEngulf and bullEngulf) or (entPin and hammer)
+shortSig = (entTriple and tripleSell) or (entDiv and bearDiv)  or (entEngulf and bearEngulf) or (entPin and star)
+canLong  = dir != "Short seulement"
+canShort = dir != "Long seulement"
+
+// ----------------------- ENTRÉES (seul bloc 'if') ----------------------------
+if longSig and canLong and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+if shortSig and canShort and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+// --------------- SORTIES : stop-loss / take-profit (ATR figé) ----------------
+var float eAtr = na
+opened = strategy.position_size != 0 and (na(strategy.position_size[1]) or strategy.position_size[1] == 0)
+eAtr := opened ? atr : eAtr
+slL = strategy.position_avg_price - eAtr * slMult
+tpL = strategy.position_avg_price + eAtr * tpMult
+slS = strategy.position_avg_price + eAtr * slMult
+tpS = strategy.position_avg_price - eAtr * tpMult
+strategy.exit("SortieL", "Long",  stop=slL, limit=tpL)
+strategy.exit("SortieS", "Short", stop=slS, limit=tpS)
+
+// ------------------------------- MARQUEURS -----------------------------------
+plotshape(longSig,  title="Signal long",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.tiny)
+plotshape(shortSig, title="Signal short", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   size=size.tiny)
