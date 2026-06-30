@@ -1,11 +1,9 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE / THREE DRIVES + SIGNAL BOUGIE REGROUPE
+//  TRIPLE DIVERGENCE / THREE DRIVES + SIGNAL BOUGIE (précis, affichage pro)
 //  100% sans indentation (aucun 'if', aucune fonction multi-lignes).
-//  - Divergence RSI<->prix (poussees, signal fort a la 3e).
-//  - UN SEUL signal bougie directionnel (haussier/baissier) qui regroupe :
-//    extreme local + cloture decisive + amplitude (ATR) + volume + RSI extreme.
-//  NB : pas de liquidations (inaccessibles a un indicateur TradingView).
+//  Signal bougie unique = extreme local + cloture decisive + corps reel +
+//  amplitude ATR + volume + RSI extreme + FILTRE DE TENDANCE (EMA) + anti-rafale.
 // =============================================================================
 indicator("Triple Div + Signal Bougie [précis]", shorttitle="3Drives+Bougie", overlay=true, max_labels_count=500)
 
@@ -21,18 +19,23 @@ drvWin     = input.int(150,"Fenêtre max des poussées (barres)", minval=10, gro
 useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
 osLvl      = input.int(40, "Seuil survente", group=gD)
 obLvl      = input.int(60, "Seuil surachat", group=gD)
-onlyTriple = input.bool(false, "Divergence: afficher SEULEMENT le triple", group=gD)
+onlyTriple = input.bool(true,  "Divergence: afficher SEULEMENT le triple", group=gD)
 
-gB = "Signal bougie (regroupé en UN signal)"
+gB = "Signal bougie (précis)"
 useCandle  = input.bool(true,  "Activer le signal bougie", group=gB)
 atrLen     = input.int(14, "Longueur ATR", minval=1, group=gB)
 candleCtx  = input.int(10, "Fenêtre extrême local (barres)", minval=1, group=gB)
-closePos   = input.float(0.66, "Clôture dans le X haut/bas de la bougie", minval=0.5, maxval=1.0, step=0.01, group=gB)
-rangeATR   = input.float(1.0, "Amplitude min de la bougie (x ATR)", minval=0.1, step=0.1, group=gB)
+closePos   = input.float(0.66, "Clôture dans le X haut/bas", minval=0.5, maxval=1.0, step=0.01, group=gB)
+bodyMin    = input.float(0.3, "Corps min (% de l'amplitude) — anti-doji", minval=0.0, maxval=1.0, step=0.05, group=gB)
+rangeATR   = input.float(1.0, "Amplitude min (x ATR)", minval=0.1, step=0.1, group=gB)
 candleVol  = input.bool(true,  "Confirmer par le volume", group=gB)
 volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gB)
 volMult    = input.float(1.5, "Volume: x la moyenne", minval=0.1, step=0.1, group=gB)
 candleRsi  = input.bool(true,  "Confirmer par le RSI extrême", group=gB)
+useTrend   = input.bool(true,  "Filtre de tendance (EMA)", group=gB)
+trendLen   = input.int(200, "EMA de tendance", minval=5, group=gB)
+showEma    = input.bool(true,  "Afficher l'EMA de tendance", group=gB)
+cooldown   = input.int(8, "Anti-rafale: barres min entre signaux", minval=0, group=gB)
 
 gI = "Affichage"
 showPanel  = input.bool(true, "Tableau d'état", group=gI)
@@ -40,6 +43,7 @@ showPanel  = input.bool(true, "Tableau d'état", group=gI)
 confirmed = barstate.isconfirmed
 atr = ta.atr(atrLen)
 r = ta.rsi(close, rsiLen)
+ema = ta.ema(close, trendLen)
 
 // --------------------------- DIVERGENCES (Three Drives) ----------------------
 plF = not na(ta.pivotlow(r, lbL, lbR))
@@ -70,25 +74,36 @@ lastBearBar := bearDiv ? bar_index : lastBearBar
 
 minorBull = bullDiv and not tripleBuy and not onlyTriple
 minorBear = bearDiv and not tripleSell and not onlyTriple
-plotshape(minorBull, title="Divergence haussière", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 50), size=size.tiny)
-plotshape(minorBear, title="Divergence baissière", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 50), size=size.tiny)
-plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.lime, text="BUY",  textcolor=color.black, size=size.normal)
-plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.red,  text="SELL", textcolor=color.white, size=size.normal)
+plotshape(minorBull, title="Divergence haussière", style=shape.circle, location=location.belowbar, color=color.new(color.green, 55), size=size.tiny)
+plotshape(minorBear, title="Divergence baissière", style=shape.circle, location=location.abovebar, color=color.new(color.red, 55), size=size.tiny)
+plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="BUY",  textcolor=color.white, size=size.small)
+plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="SELL", textcolor=color.white, size=size.small)
 
-// ------------------- SIGNAL BOUGIE REGROUPÉ (UN seul, directionnel) ----------
+// ------------------- SIGNAL BOUGIE (précis, affichage discret) ---------------
 rng = high - low
 atLow  = low  <= ta.lowest(low,  candleCtx)
 atHigh = high >= ta.highest(high, candleCtx)
 rangeOK = rng >= atr * rangeATR
+bodyOK  = rng > 0 and math.abs(close - open) / rng >= bodyMin
 cVolOK = not candleVol or volume > ta.sma(volume, volLen) * volMult
 closeUp = rng > 0 and (close - low) / rng >= closePos
 closeDn = rng > 0 and (high - close) / rng >= closePos
 rsiBuyOK  = not candleRsi or r <= osLvl
 rsiSellOK = not candleRsi or r >= obLvl
-candleBull = useCandle and confirmed and atLow and rangeOK and cVolOK and closeUp and rsiBuyOK
-candleBear = useCandle and confirmed and atHigh and rangeOK and cVolOK and closeDn and rsiSellOK
-plotshape(candleBull, title="Signal bougie HAUSSIER", style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="▲", textcolor=color.white, size=size.small)
-plotshape(candleBear, title="Signal bougie BAISSIER", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="▼", textcolor=color.white, size=size.small)
+trendUp = not useTrend or close > ema
+trendDn = not useTrend or close < ema
+rawBull = useCandle and confirmed and atLow and rangeOK and bodyOK and cVolOK and closeUp and rsiBuyOK and trendUp
+rawBear = useCandle and confirmed and atHigh and rangeOK and bodyOK and cVolOK and closeDn and rsiSellOK and trendDn
+
+var int lastSig = na
+sinceSig = na(lastSig) ? 1000000 : (bar_index - lastSig)
+candleBull = rawBull and sinceSig > cooldown
+candleBear = rawBear and sinceSig > cooldown
+lastSig := (candleBull or candleBear) ? bar_index : lastSig
+
+plot(showEma and useTrend ? ema : na, "EMA tendance", color=color.new(color.gray, 55), linewidth=1)
+plotshape(candleBull, title="Signal bougie HAUSSIER", style=shape.triangleup,   location=location.belowbar, color=color.new(#089981, 0), size=size.tiny)
+plotshape(candleBear, title="Signal bougie BAISSIER", style=shape.triangledown, location=location.abovebar, color=color.new(#f23645, 0), size=size.tiny)
 
 // ------------------------------- TABLEAU -------------------------------------
 candleState = candleBull ? "HAUSSIER ▲" : candleBear ? "BAISSIER ▼" : "—"
@@ -100,8 +115,8 @@ var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=co
 tShow = showPanel and barstate.islast
 table.cell(t, 0, 0, tShow ? "RSI" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 30) : color.new(color.gray, 100))
 table.cell(t, 1, 0, tShow ? str.tostring(r, "0") : "", text_color=rcol)
-table.cell(t, 0, 1, tShow ? "Poussées ▲ / ▼" : "", text_color=color.white)
-table.cell(t, 1, 1, tShow ? str.tostring(bullDrives) + " / " + str.tostring(bearDrives) : "", text_color=color.white)
+table.cell(t, 0, 1, tShow ? "Tendance" : "", text_color=color.white)
+table.cell(t, 1, 1, tShow ? (close > ema ? "Haussière" : "Baissière") : "", text_color = close > ema ? color.green : color.red)
 table.cell(t, 0, 2, tShow ? "Biais divergence" : "", text_color=color.white)
 table.cell(t, 1, 2, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
 table.cell(t, 0, 3, tShow ? "Signal bougie" : "", text_color=color.white)
@@ -110,5 +125,5 @@ table.cell(t, 1, 3, tShow ? candleState : "", text_color=color.white, bgcolor=tS
 // -------------------------------- ALERTES ------------------------------------
 alertcondition(tripleBuy,   "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
 alertcondition(tripleSell,  "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
-alertcondition(candleBull,  "Signal bougie HAUSSIER", "Bougie : retournement haussier confirme")
-alertcondition(candleBear,  "Signal bougie BAISSIER", "Bougie : retournement baissier confirme")
+alertcondition(candleBull,  "Signal bougie HAUSSIER", "Bougie : retournement haussier confirme (tendance + volume + RSI)")
+alertcondition(candleBear,  "Signal bougie BAISSIER", "Bougie : retournement baissier confirme (tendance + volume + RSI)")
