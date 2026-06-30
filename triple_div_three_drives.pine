@@ -1,11 +1,15 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE / THREE DRIVES + SIGNAL BOUGIE (précis, affichage pro)
+//  TRIPLE DIVERGENCE + ANALYSE DE BOUGIES CONDENSEE (prédiction directionnelle)
 //  100% sans indentation (aucun 'if', aucune fonction multi-lignes).
-//  Signal bougie unique = extreme local + cloture decisive + corps reel +
-//  amplitude ATR + volume + RSI extreme + FILTRE DE TENDANCE (EMA) + anti-rafale.
+//
+//  L'analyse de bougies regroupe plusieurs facteurs (position de cloture, corps,
+//  avalement, meches de rejet, extreme local, momentum, volume) en UN score
+//  directionnel exprime en % de confiance (ex. "Haussier 67%").
+//  NB : le % est un degre de CONFIANCE de confluence, pas une probabilite
+//  prouvee. A valider par backtest.
 // =============================================================================
-indicator("Triple Div + Signal Bougie [précis]", shorttitle="3Drives+Bougie", overlay=true, max_labels_count=500)
+indicator("Triple Div + Bougies (prédiction)", shorttitle="3Drives+Pred", overlay=true, max_labels_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
 gD = "Divergence / Three Drives"
@@ -14,36 +18,26 @@ lbL        = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
 lbR        = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
 divMin     = input.int(5,  "Distance min entre pivots (barres)", minval=1, group=gD)
 divMax     = input.int(60, "Distance max entre pivots (barres)", minval=2, group=gD)
-drives     = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
+drives     = input.int(3,  "Poussées pour le triple", minval=2, maxval=6, group=gD)
 drvWin     = input.int(150,"Fenêtre max des poussées (barres)", minval=10, group=gD)
 useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
 osLvl      = input.int(40, "Seuil survente", group=gD)
 obLvl      = input.int(60, "Seuil surachat", group=gD)
-onlyTriple = input.bool(true,  "Divergence: afficher SEULEMENT le triple", group=gD)
+onlyTriple = input.bool(true, "Divergence: afficher SEULEMENT le triple", group=gD)
 
-gB = "Signal bougie (précis)"
-useCandle  = input.bool(true,  "Activer le signal bougie", group=gB)
-atrLen     = input.int(14, "Longueur ATR", minval=1, group=gB)
+gB = "Analyse de bougies (prédiction)"
+useCandle  = input.bool(true, "Activer l'analyse de bougies", group=gB)
 candleCtx  = input.int(10, "Fenêtre extrême local (barres)", minval=1, group=gB)
-closePos   = input.float(0.66, "Clôture dans le X haut/bas", minval=0.5, maxval=1.0, step=0.01, group=gB)
-bodyMin    = input.float(0.3, "Corps min (% de l'amplitude) — anti-doji", minval=0.0, maxval=1.0, step=0.05, group=gB)
-rangeATR   = input.float(1.0, "Amplitude min (x ATR)", minval=0.1, step=0.1, group=gB)
-candleVol  = input.bool(true,  "Confirmer par le volume", group=gB)
 volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gB)
-volMult    = input.float(1.5, "Volume: x la moyenne", minval=0.1, step=0.1, group=gB)
-candleRsi  = input.bool(true,  "Confirmer par le RSI extrême", group=gB)
-useTrend   = input.bool(true,  "Filtre de tendance (EMA)", group=gB)
-trendLen   = input.int(200, "EMA de tendance", minval=5, group=gB)
-showEma    = input.bool(true,  "Afficher l'EMA de tendance", group=gB)
-cooldown   = input.int(8, "Anti-rafale: barres min entre signaux", minval=0, group=gB)
+volMult    = input.float(1.5, "Volume fort: x la moyenne", minval=0.1, step=0.1, group=gB)
+smoothLen  = input.int(3, "Lissage de la prédiction (barres)", minval=1, group=gB)
+seuilAff   = input.int(60, "Seuil d'affichage du marqueur (%)", minval=50, maxval=90, group=gB)
 
 gI = "Affichage"
 showPanel  = input.bool(true, "Tableau d'état", group=gI)
 
 confirmed = barstate.isconfirmed
-atr = ta.atr(atrLen)
 r = ta.rsi(close, rsiLen)
-ema = ta.ema(close, trendLen)
 
 // --------------------------- DIVERGENCES (Three Drives) ----------------------
 plF = not na(ta.pivotlow(r, lbL, lbR))
@@ -79,51 +73,57 @@ plotshape(minorBear, title="Divergence baissière", style=shape.circle, location
 plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="BUY",  textcolor=color.white, size=size.small)
 plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="SELL", textcolor=color.white, size=size.small)
 
-// ------------------- SIGNAL BOUGIE (précis, affichage discret) ---------------
+// =================== ANALYSE DE BOUGIES CONDENSEE (score %) ===================
 rng = high - low
 atLow  = low  <= ta.lowest(low,  candleCtx)
 atHigh = high >= ta.highest(high, candleCtx)
-rangeOK = rng >= atr * rangeATR
-bodyOK  = rng > 0 and math.abs(close - open) / rng >= bodyMin
-cVolOK = not candleVol or volume > ta.sma(volume, volLen) * volMult
-closeUp = rng > 0 and (close - low) / rng >= closePos
-closeDn = rng > 0 and (high - close) / rng >= closePos
-rsiBuyOK  = not candleRsi or r <= osLvl
-rsiSellOK = not candleRsi or r >= obLvl
-trendUp = not useTrend or close > ema
-trendDn = not useTrend or close < ema
-rawBull = useCandle and confirmed and atLow and rangeOK and bodyOK and cVolOK and closeUp and rsiBuyOK and trendUp
-rawBear = useCandle and confirmed and atHigh and rangeOK and bodyOK and cVolOK and closeDn and rsiSellOK and trendDn
+posUp = rng > 0 ? (close - low) / rng : 0.5
+bodyFrac = rng > 0 ? math.abs(close - open) / rng : 0.0
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+volHi = volume > ta.sma(volume, volLen) * volMult
+bEngulf = close > open and close[1] < open[1] and close > open[1] and open < close[1]
+sEngulf = close < open and close[1] > open[1] and close < open[1] and open > close[1]
+bPin = lowerWick > math.abs(close - open) * 1.5
+sPin = upperWick > math.abs(close - open) * 1.5
+bMom = close > open and close[1] > open[1] and close[2] > open[2]
+sMom = close < open and close[1] < open[1] and close[2] < open[2]
 
-var int lastSig = na
-sinceSig = na(lastSig) ? 1000000 : (bar_index - lastSig)
-candleBull = rawBull and sinceSig > cooldown
-candleBear = rawBear and sinceSig > cooldown
-lastSig := (candleBull or candleBear) ? bar_index : lastSig
+// Score haussier / baissier (facteurs regroupes)
+bull = posUp * 30 + (close > open ? bodyFrac * 20 : 0) + (bEngulf ? 20 : 0) + (bPin ? 15 : 0) + (atLow ? 15 : 0) + (bMom ? 10 : 0) + (volHi and close > open ? 15 : 0)
+bear = (1 - posUp) * 30 + (close < open ? bodyFrac * 20 : 0) + (sEngulf ? 20 : 0) + (sPin ? 15 : 0) + (atHigh ? 15 : 0) + (sMom ? 10 : 0) + (volHi and close < open ? 15 : 0)
+total = bull + bear
+bullPctRaw = total > 0 ? bull / total * 100 : 50
+bullPct = ta.sma(bullPctRaw, smoothLen)
+predDir = bullPct >= 50 ? 1 : -1
+conf = math.max(bullPct, 100 - bullPct)
 
-plot(showEma and useTrend ? ema : na, "EMA tendance", color=color.new(color.gray, 55), linewidth=1)
-plotshape(candleBull, title="Signal bougie HAUSSIER", style=shape.triangleup,   location=location.belowbar, color=color.new(#089981, 0), size=size.tiny)
-plotshape(candleBear, title="Signal bougie BAISSIER", style=shape.triangledown, location=location.abovebar, color=color.new(#f23645, 0), size=size.tiny)
+// Marqueur quand une lecture FORTE demarre (pas a chaque barre)
+strong = useCandle and conf >= seuilAff
+markBull = strong and predDir == 1 and confirmed and not (strong[1] and predDir[1] == 1)
+markBear = strong and predDir == -1 and confirmed and not (strong[1] and predDir[1] == -1)
+plotshape(markBull, title="Prédiction HAUSSIÈRE", style=shape.triangleup,   location=location.belowbar, color=color.new(#089981, 0), size=size.tiny)
+plotshape(markBear, title="Prédiction BAISSIÈRE", style=shape.triangledown, location=location.abovebar, color=color.new(#f23645, 0), size=size.tiny)
 
 // ------------------------------- TABLEAU -------------------------------------
-candleState = candleBull ? "HAUSSIER ▲" : candleBear ? "BAISSIER ▼" : "—"
-candleCol   = candleBull ? color.green : candleBear ? color.red : color.gray
+predText = conf < seuilAff ? "Neutre " + str.tostring(conf, "0") + "%" : (predDir == 1 ? "HAUSSIER " : "BAISSIER ") + str.tostring(conf, "0") + "%"
+predCol  = conf < seuilAff ? color.gray : (predDir == 1 ? color.green : color.red)
 bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
 bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
 rcol = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white
 var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.new(color.gray, 50), frame_width=1)
 tShow = showPanel and barstate.islast
-table.cell(t, 0, 0, tShow ? "RSI" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 30) : color.new(color.gray, 100))
-table.cell(t, 1, 0, tShow ? str.tostring(r, "0") : "", text_color=rcol)
-table.cell(t, 0, 1, tShow ? "Tendance" : "", text_color=color.white)
-table.cell(t, 1, 1, tShow ? (close > ema ? "Haussière" : "Baissière") : "", text_color = close > ema ? color.green : color.red)
-table.cell(t, 0, 2, tShow ? "Biais divergence" : "", text_color=color.white)
-table.cell(t, 1, 2, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
-table.cell(t, 0, 3, tShow ? "Signal bougie" : "", text_color=color.white)
-table.cell(t, 1, 3, tShow ? candleState : "", text_color=color.white, bgcolor=tShow ? color.new(candleCol, 40) : color.new(color.gray, 100))
+table.cell(t, 0, 0, tShow ? "PROCHAIN MVT" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 25) : color.new(color.gray, 100))
+table.cell(t, 1, 0, tShow ? predText : "", text_color=color.white, bgcolor=tShow ? color.new(predCol, 25) : color.new(color.gray, 100))
+table.cell(t, 0, 1, tShow ? "RSI" : "", text_color=color.white)
+table.cell(t, 1, 1, tShow ? str.tostring(r, "0") : "", text_color=rcol)
+table.cell(t, 0, 2, tShow ? "Poussées ▲ / ▼" : "", text_color=color.white)
+table.cell(t, 1, 2, tShow ? str.tostring(bullDrives) + " / " + str.tostring(bearDrives) : "", text_color=color.white)
+table.cell(t, 0, 3, tShow ? "Biais divergence" : "", text_color=color.white)
+table.cell(t, 1, 3, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
 
 // -------------------------------- ALERTES ------------------------------------
-alertcondition(tripleBuy,   "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
-alertcondition(tripleSell,  "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
-alertcondition(candleBull,  "Signal bougie HAUSSIER", "Bougie : retournement haussier confirme (tendance + volume + RSI)")
-alertcondition(candleBear,  "Signal bougie BAISSIER", "Bougie : retournement baissier confirme (tendance + volume + RSI)")
+alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
+alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
+alertcondition(markBull,   "Prédiction HAUSSIÈRE",   "Analyse bougies : prochain mouvement haussier (confiance elevee)")
+alertcondition(markBear,   "Prédiction BAISSIÈRE",   "Analyse bougies : prochain mouvement baissier (confiance elevee)")
