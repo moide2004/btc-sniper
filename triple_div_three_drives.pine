@@ -1,45 +1,52 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE + ANALYSE DE BOUGIES CONDENSEE (prédiction directionnelle)
+//  TRIPLE DIVERGENCE RSI + MOTEUR DE CHANDELIERS (quant) avec REUSSITE MESUREE
 //  100% sans indentation (aucun 'if', aucune fonction multi-lignes).
 //
-//  L'analyse de bougies regroupe plusieurs facteurs (position de cloture, corps,
-//  avalement, meches de rejet, extreme local, momentum, volume) en UN score
-//  directionnel exprime en % de confiance (ex. "Haussier 67%").
-//  NB : le % est un degre de CONFIANCE de confluence, pas une probabilite
-//  prouvee. A valider par backtest.
+//  Moteur bougies : figures classiques definies strictement (avalement, marteau,
+//  etoile filante, doji, etoile matin/soir, piercing/dark cloud, 3 soldats/corbeaux,
+//  pincettes, marubozu), PONDEREES par le contexte (extreme local, RSI, volume).
+//  -> un signal directionnel haussier / baissier.
+//
+//  REUSSITE MESUREE : l'indicateur compte, sur tout l'historique, combien de fois
+//  son signal a vu juste H barres plus tard (vrai taux, pas un % invente).
 // =============================================================================
-indicator("Triple Div + Bougies (prédiction)", shorttitle="3Drives+Pred", overlay=true, max_labels_count=500)
+indicator("Triple Div RSI + Chandeliers Quant", shorttitle="3Div+Candles", overlay=true, max_labels_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
-gD = "Divergence / Three Drives"
+gD = "Triple divergence RSI"
 rsiLen     = input.int(14, "Longueur RSI", minval=2, group=gD)
 lbL        = input.int(5,  "Pivot gauche (barres)",  minval=1, group=gD)
 lbR        = input.int(5,  "Pivot droite (barres)",  minval=1, group=gD)
-divMin     = input.int(5,  "Distance min entre pivots (barres)", minval=1, group=gD)
-divMax     = input.int(60, "Distance max entre pivots (barres)", minval=2, group=gD)
+divMin     = input.int(5,  "Distance min entre pivots", minval=1, group=gD)
+divMax     = input.int(60, "Distance max entre pivots", minval=2, group=gD)
 drives     = input.int(3,  "Poussées pour le triple", minval=2, maxval=6, group=gD)
-drvWin     = input.int(150,"Fenêtre max des poussées (barres)", minval=10, group=gD)
+drvWin     = input.int(150,"Fenêtre max des poussées", minval=10, group=gD)
 useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
 osLvl      = input.int(40, "Seuil survente", group=gD)
 obLvl      = input.int(60, "Seuil surachat", group=gD)
 onlyTriple = input.bool(true, "Divergence: afficher SEULEMENT le triple", group=gD)
 
-gB = "Analyse de bougies (prédiction)"
-useCandle  = input.bool(true, "Activer l'analyse de bougies", group=gB)
-candleCtx  = input.int(10, "Fenêtre extrême local (barres)", minval=1, group=gB)
+gB = "Moteur de chandeliers (quant)"
+useCandle  = input.bool(true, "Activer le moteur de chandeliers", group=gB)
+atrLen     = input.int(14, "Longueur ATR", minval=1, group=gB)
+ctxLen     = input.int(10, "Fenêtre extrême local (barres)", minval=1, group=gB)
 volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gB)
 volMult    = input.float(1.5, "Volume fort: x la moyenne", minval=0.1, step=0.1, group=gB)
-smoothLen  = input.int(3, "Lissage de la prédiction (barres)", minval=1, group=gB)
-seuilAff   = input.int(60, "Seuil d'affichage du marqueur (%)", minval=50, maxval=90, group=gB)
+sigThr     = input.float(3.0, "Seuil de signal (force minimale)", minval=1.0, step=0.5, group=gB)
+cooldown   = input.int(6, "Anti-rafale: barres min entre signaux", minval=0, group=gB)
+
+gM = "Réussite mesurée"
+horizon    = input.int(10, "Horizon de mesure (barres après le signal)", minval=1, group=gM)
 
 gI = "Affichage"
 showPanel  = input.bool(true, "Tableau d'état", group=gI)
 
 confirmed = barstate.isconfirmed
+atr = ta.atr(atrLen)
 r = ta.rsi(close, rsiLen)
 
-// --------------------------- DIVERGENCES (Three Drives) ----------------------
+// ===================== TRIPLE DIVERGENCE RSI (inchangée) =====================
 plF = not na(ta.pivotlow(r, lbL, lbR))
 phF = not na(ta.pivothigh(r, lbL, lbR))
 prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
@@ -50,7 +57,6 @@ gapBull = ta.barssince(plF[1])
 gapBear = ta.barssince(phF[1])
 bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
 bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= divMin and gapBear <= divMax and (not useOBOS or prevRSIhigh >= obLvl)
-
 var int bullDrives = 0
 var int bearDrives = 0
 var int lastBullBar = na
@@ -65,7 +71,6 @@ bullDrives := tripleBuy ? 0 : (bearDiv ? 0 : newBull)
 bearDrives := tripleSell ? 0 : (bullDiv ? 0 : newBear)
 lastBullBar := bullDiv ? bar_index : lastBullBar
 lastBearBar := bearDiv ? bar_index : lastBearBar
-
 minorBull = bullDiv and not tripleBuy and not onlyTriple
 minorBear = bearDiv and not tripleSell and not onlyTriple
 plotshape(minorBull, title="Divergence haussière", style=shape.circle, location=location.belowbar, color=color.new(color.green, 55), size=size.tiny)
@@ -73,57 +78,97 @@ plotshape(minorBear, title="Divergence baissière", style=shape.circle, location
 plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="BUY",  textcolor=color.white, size=size.small)
 plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="SELL", textcolor=color.white, size=size.small)
 
-// =================== ANALYSE DE BOUGIES CONDENSEE (score %) ===================
-rng = high - low
-atLow  = low  <= ta.lowest(low,  candleCtx)
-atHigh = high >= ta.highest(high, candleCtx)
-posUp = rng > 0 ? (close - low) / rng : 0.5
-bodyFrac = rng > 0 ? math.abs(close - open) / rng : 0.0
-lowerWick = math.min(open, close) - low
-upperWick = high - math.max(open, close)
-volHi = volume > ta.sma(volume, volLen) * volMult
-bEngulf = close > open and close[1] < open[1] and close > open[1] and open < close[1]
-sEngulf = close < open and close[1] > open[1] and close < open[1] and open > close[1]
-bPin = lowerWick > math.abs(close - open) * 1.5
-sPin = upperWick > math.abs(close - open) * 1.5
-bMom = close > open and close[1] > open[1] and close[2] > open[2]
-sMom = close < open and close[1] < open[1] and close[2] < open[2]
+// ===================== MOTEUR DE CHANDELIERS (figures) =======================
+b = close > open
+s = close < open
+body  = math.abs(close - open)
+rng   = high - low
+uw    = high - math.max(open, close)
+dw    = math.min(open, close) - low
+body1 = math.abs(close[1] - open[1])
+body2 = math.abs(close[2] - open[2])
+atLow  = low  <= ta.lowest(low,  ctxLen)
+atHigh = high >= ta.highest(high, ctxLen)
+volHi  = volume > ta.sma(volume, volLen) * volMult
 
-// Score haussier / baissier (facteurs regroupes)
-bull = posUp * 30 + (close > open ? bodyFrac * 20 : 0) + (bEngulf ? 20 : 0) + (bPin ? 15 : 0) + (atLow ? 15 : 0) + (bMom ? 10 : 0) + (volHi and close > open ? 15 : 0)
-bear = (1 - posUp) * 30 + (close < open ? bodyFrac * 20 : 0) + (sEngulf ? 20 : 0) + (sPin ? 15 : 0) + (atHigh ? 15 : 0) + (sMom ? 10 : 0) + (volHi and close < open ? 15 : 0)
-total = bull + bear
-bullPctRaw = total > 0 ? bull / total * 100 : 50
-bullPct = ta.sma(bullPctRaw, smoothLen)
-predDir = bullPct >= 50 ? 1 : -1
-conf = math.max(bullPct, 100 - bullPct)
+bullEngulf = s[1] and b and close >= open[1] and open <= close[1] and body > body1
+bearEngulf = b[1] and s and close <= open[1] and open >= close[1] and body > body1
+bullEngStr = bullEngulf and close > high[1]
+bearEngStr = bearEngulf and close < low[1]
+hammer = body > 0 and dw > body * 2 and uw < body
+star   = body > 0 and uw > body * 2 and dw < body
+doji   = rng > 0 and body <= rng * 0.1
+bullMaru = b and rng > 0 and body >= rng * 0.9
+bearMaru = s and rng > 0 and body >= rng * 0.9
+morning = s[2] and body2 >= atr * 0.5 and body1 <= body2 * 0.5 and b and close >= (open[2] + close[2]) / 2
+evening = b[2] and body2 >= atr * 0.5 and body1 <= body2 * 0.5 and s and close <= (open[2] + close[2]) / 2
+piercing = s[1] and b and open < close[1] and close > (open[1] + close[1]) / 2 and close < open[1]
+darkcloud = b[1] and s and open > close[1] and close < (open[1] + close[1]) / 2 and close > open[1]
+soldiers = b and b[1] and b[2] and close > close[1] and close[1] > close[2]
+crows    = s and s[1] and s[2] and close < close[1] and close[1] < close[2]
+tol = atr * 0.1
+tweezerBot = math.abs(low - low[1]) <= tol and (hammer or b) and s[1]
+tweezerTop = math.abs(high - high[1]) <= tol and (star or s) and b[1]
 
-// Marqueur quand une lecture FORTE demarre (pas a chaque barre)
-strong = useCandle and conf >= seuilAff
-markBull = strong and predDir == 1 and confirmed and not (strong[1] and predDir[1] == 1)
-markBear = strong and predDir == -1 and confirmed and not (strong[1] and predDir[1] == -1)
-plotshape(markBull, title="Prédiction HAUSSIÈRE", style=shape.triangleup,   location=location.belowbar, color=color.new(#089981, 0), size=size.tiny)
-plotshape(markBear, title="Prédiction BAISSIÈRE", style=shape.triangledown, location=location.abovebar, color=color.new(#f23645, 0), size=size.tiny)
+// Votes pondérés (figure) + contexte (extreme, RSI, volume)
+bullVotes = (bullEngulf ? 2 : 0) + (bullEngStr ? 1 : 0) + (hammer ? 2 : 0) + (morning ? 3 : 0) + (piercing ? 2 : 0) + (soldiers ? 3 : 0) + (tweezerBot ? 1.5 : 0) + (bullMaru ? 1.5 : 0) + (doji and atLow ? 1 : 0)
+bearVotes = (bearEngulf ? 2 : 0) + (bearEngStr ? 1 : 0) + (star ? 2 : 0) + (evening ? 3 : 0) + (darkcloud ? 2 : 0) + (crows ? 3 : 0) + (tweezerTop ? 1.5 : 0) + (bearMaru ? 1.5 : 0) + (doji and atHigh ? 1 : 0)
+ctxBull = (atLow ? 1 : 0) + (r <= osLvl ? 1 : 0) + (volHi and b ? 1 : 0)
+ctxBear = (atHigh ? 1 : 0) + (r >= obLvl ? 1 : 0) + (volHi and s ? 1 : 0)
+bullScore = bullVotes > 0 ? bullVotes + ctxBull : 0.0
+bearScore = bearVotes > 0 ? bearVotes + ctxBear : 0.0
+net = bullScore - bearScore
+
+rawBull = useCandle and confirmed and net >= sigThr
+rawBear = useCandle and confirmed and net <= -sigThr
+var int lastSig = na
+sinceSig = na(lastSig) ? 1000000 : (bar_index - lastSig)
+sigBull = rawBull and sinceSig > cooldown
+sigBear = rawBear and sinceSig > cooldown
+lastSig := (sigBull or sigBear) ? bar_index : lastSig
+
+plotshape(sigBull, title="Signal bougie HAUSSIER", style=shape.triangleup,   location=location.belowbar, color=color.new(#089981, 0), size=size.tiny)
+plotshape(sigBear, title="Signal bougie BAISSIER", style=shape.triangledown, location=location.abovebar, color=color.new(#f23645, 0), size=size.tiny)
+
+// ===================== RÉUSSITE MESURÉE (sur l'historique) ===================
+var int bW = 0
+var int bT = 0
+var int sW = 0
+var int sT = 0
+okHist = bar_index > horizon
+sBullH = sigBull[horizon]
+sBearH = sigBear[horizon]
+upH = close > close[horizon]
+dnH = close < close[horizon]
+bT := (okHist and sBullH) ? bT + 1 : bT
+bW := (okHist and sBullH and upH) ? bW + 1 : bW
+sT := (okHist and sBearH) ? sT + 1 : sT
+sW := (okHist and sBearH and dnH) ? sW + 1 : sW
+bRate = bT > 0 ? bW / bT * 100 : na
+sRate = sT > 0 ? sW / sT * 100 : na
 
 // ------------------------------- TABLEAU -------------------------------------
-predText = conf < seuilAff ? "Neutre " + str.tostring(conf, "0") + "%" : (predDir == 1 ? "HAUSSIER " : "BAISSIER ") + str.tostring(conf, "0") + "%"
-predCol  = conf < seuilAff ? color.gray : (predDir == 1 ? color.green : color.red)
+candleDir = net >= sigThr ? "HAUSSIER ▲" : net <= -sigThr ? "BAISSIER ▼" : "—"
+candleCol = net >= sigThr ? color.green : net <= -sigThr ? color.red : color.gray
 bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
 bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
-rcol = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white
-var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=color.new(color.gray, 50), frame_width=1)
+bTxt = na(bRate) ? "—" : str.tostring(bRate, "0") + "% (" + str.tostring(bT) + ")"
+sTxt = na(sRate) ? "—" : str.tostring(sRate, "0") + "% (" + str.tostring(sT) + ")"
+var table t = table.new(position.top_right, 2, 5, border_width=1, frame_color=color.new(color.gray, 50), frame_width=1)
 tShow = showPanel and barstate.islast
-table.cell(t, 0, 0, tShow ? "PROCHAIN MVT" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 25) : color.new(color.gray, 100))
-table.cell(t, 1, 0, tShow ? predText : "", text_color=color.white, bgcolor=tShow ? color.new(predCol, 25) : color.new(color.gray, 100))
-table.cell(t, 0, 1, tShow ? "RSI" : "", text_color=color.white)
-table.cell(t, 1, 1, tShow ? str.tostring(r, "0") : "", text_color=rcol)
-table.cell(t, 0, 2, tShow ? "Poussées ▲ / ▼" : "", text_color=color.white)
-table.cell(t, 1, 2, tShow ? str.tostring(bullDrives) + " / " + str.tostring(bearDrives) : "", text_color=color.white)
-table.cell(t, 0, 3, tShow ? "Biais divergence" : "", text_color=color.white)
-table.cell(t, 1, 3, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
+table.cell(t, 0, 0, tShow ? "SIGNAL BOUGIE" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 25) : color.new(color.gray, 100))
+table.cell(t, 1, 0, tShow ? candleDir + "  (" + str.tostring(net, "0.0") + ")" : "", text_color=color.white, bgcolor=tShow ? color.new(candleCol, 30) : color.new(color.gray, 100))
+table.cell(t, 0, 1, tShow ? "Réussite ▲ (" + str.tostring(horizon) + "b)" : "", text_color=color.white)
+table.cell(t, 1, 1, tShow ? bTxt : "", text_color=color.green)
+table.cell(t, 0, 2, tShow ? "Réussite ▼ (" + str.tostring(horizon) + "b)" : "", text_color=color.white)
+table.cell(t, 1, 2, tShow ? sTxt : "", text_color=color.red)
+table.cell(t, 0, 3, tShow ? "RSI" : "", text_color=color.white)
+table.cell(t, 1, 3, tShow ? str.tostring(r, "0") : "", text_color = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white)
+table.cell(t, 0, 4, tShow ? "Biais divergence" : "", text_color=color.white)
+table.cell(t, 1, 4, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
 
 // -------------------------------- ALERTES ------------------------------------
 alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
 alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
-alertcondition(markBull,   "Prédiction HAUSSIÈRE",   "Analyse bougies : prochain mouvement haussier (confiance elevee)")
-alertcondition(markBear,   "Prédiction BAISSIÈRE",   "Analyse bougies : prochain mouvement baissier (confiance elevee)")
+alertcondition(sigBull,    "Signal bougie HAUSSIER", "Moteur bougies : signal haussier")
+alertcondition(sigBear,    "Signal bougie BAISSIER", "Moteur bougies : signal baissier")
