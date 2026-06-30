@@ -1,11 +1,13 @@
 //@version=5
 // =============================================================================
-//  TRIPLE DIVERGENCE / THREE DRIVES + CHANDELIERS — version 100% sans indentation
-//  (aucun bloc 'if', aucune fonction multi-lignes -> rien ne casse au coller).
-//  Overlay. Divergence calculee sur le timeframe affiche. Scalp comme swing.
+//  TRIPLE DIVERGENCE / THREE DRIVES + SIGNAL BOUGIE REGROUPE
+//  100% sans indentation (aucun 'if', aucune fonction multi-lignes).
+//  - Divergence RSI<->prix (poussees, signal fort a la 3e).
+//  - UN SEUL signal bougie directionnel (haussier/baissier) qui regroupe :
+//    extreme local + cloture decisive + amplitude (ATR) + volume + RSI extreme.
 //  NB : pas de liquidations (inaccessibles a un indicateur TradingView).
 // =============================================================================
-indicator("Triple Div / Three Drives + Chandeliers [calibré]", shorttitle="3Drives+Bougies", overlay=true, max_labels_count=500)
+indicator("Triple Div + Signal Bougie [précis]", shorttitle="3Drives+Bougie", overlay=true, max_labels_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
 gD = "Divergence / Three Drives"
@@ -17,30 +19,29 @@ divMax     = input.int(60, "Distance max entre pivots (barres)", minval=2, group
 drives     = input.int(3,  "Poussées pour le signal fort (triple = 3)", minval=2, maxval=6, group=gD)
 drvWin     = input.int(150,"Fenêtre max des poussées (barres)", minval=10, group=gD)
 useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
-osLvl      = input.int(40, "Seuil survente (div. haussière)", group=gD)
-obLvl      = input.int(60, "Seuil surachat (div. baissière)", group=gD)
-onlyTriple = input.bool(false, "Afficher SEULEMENT le signal triple", group=gD)
+osLvl      = input.int(40, "Seuil survente", group=gD)
+obLvl      = input.int(60, "Seuil surachat", group=gD)
+onlyTriple = input.bool(false, "Divergence: afficher SEULEMENT le triple", group=gD)
 
-gC = "Chandeliers (filtrés par ATR)"
-atrLen     = input.int(14, "Longueur ATR", minval=1, group=gC)
-minBodyATR = input.float(0.6, "Corps min (x ATR)", minval=0.0, step=0.1, group=gC)
-useEngulf  = input.bool(true,  "Avalement (engulfing)", group=gC)
-engulfMin  = input.float(0.8, "Avalement: corps min (x ATR)", minval=0.0, step=0.1, group=gC)
-useVol     = input.bool(true,  "Avalement: confirmer par le volume", group=gC)
-volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gC)
-volMult    = input.float(1.5, "Volume: x la moyenne pour valider", minval=0.1, step=0.1, group=gC)
-usePin     = input.bool(true,  "Marteau / Étoile filante", group=gC)
-pinRatio   = input.float(2.0,  "Mèche / corps min (pin bar)", minval=1.0, step=0.1, group=gC)
-pinCtx     = input.int(10, "Fenêtre extrême local (pin bar)", minval=1, group=gC)
+gB = "Signal bougie (regroupé en UN signal)"
+useCandle  = input.bool(true,  "Activer le signal bougie", group=gB)
+atrLen     = input.int(14, "Longueur ATR", minval=1, group=gB)
+candleCtx  = input.int(10, "Fenêtre extrême local (barres)", minval=1, group=gB)
+closePos   = input.float(0.66, "Clôture dans le X haut/bas de la bougie", minval=0.5, maxval=1.0, step=0.01, group=gB)
+rangeATR   = input.float(1.0, "Amplitude min de la bougie (x ATR)", minval=0.1, step=0.1, group=gB)
+candleVol  = input.bool(true,  "Confirmer par le volume", group=gB)
+volLen     = input.int(20, "Volume: moyenne (barres)", minval=1, group=gB)
+volMult    = input.float(1.5, "Volume: x la moyenne", minval=0.1, step=0.1, group=gB)
+candleRsi  = input.bool(true,  "Confirmer par le RSI extrême", group=gB)
 
 gI = "Affichage"
 showPanel  = input.bool(true, "Tableau d'état", group=gI)
 
 confirmed = barstate.isconfirmed
 atr = ta.atr(atrLen)
-
-// --------------------------- RSI + DIVERGENCES -------------------------------
 r = ta.rsi(close, rsiLen)
+
+// --------------------------- DIVERGENCES (Three Drives) ----------------------
 plF = not na(ta.pivotlow(r, lbL, lbR))
 phF = not na(ta.pivothigh(r, lbL, lbR))
 prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
@@ -52,7 +53,6 @@ gapBear = ta.barssince(phF[1])
 bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
 bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= divMin and gapBear <= divMax and (not useOBOS or prevRSIhigh >= obLvl)
 
-// ------------------ COMPTEUR DE POUSSÉES (sans bloc 'if') --------------------
 var int bullDrives = 0
 var int bearDrives = 0
 var int lastBullBar = na
@@ -68,36 +68,31 @@ bearDrives := tripleSell ? 0 : (bullDiv ? 0 : newBear)
 lastBullBar := bullDiv ? bar_index : lastBullBar
 lastBearBar := bearDiv ? bar_index : lastBearBar
 
-// --------------------------- MARQUEURS DIVERGENCE ----------------------------
 minorBull = bullDiv and not tripleBuy and not onlyTriple
 minorBear = bearDiv and not tripleSell and not onlyTriple
-plotshape(minorBull, title="Divergence haussière", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny)
-plotshape(minorBear, title="Divergence baissière", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny)
+plotshape(minorBull, title="Divergence haussière", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 50), size=size.tiny)
+plotshape(minorBear, title="Divergence baissière", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 50), size=size.tiny)
 plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.lime, text="BUY",  textcolor=color.black, size=size.normal)
 plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.red,  text="SELL", textcolor=color.white, size=size.normal)
 
-// ------------------------------ CHANDELIERS ----------------------------------
-body   = math.abs(close - open)
-bodyHi = math.max(open, close)
-bodyLo = math.min(open, close)
-upWick = high - bodyHi
-dnWick = bodyLo - low
-signif = body >= atr * minBodyATR
-volOK = not useVol or volume > ta.sma(volume, volLen) * volMult
-bullEngulf = useEngulf and confirmed and close > open and close[1] < open[1] and close > high[1] and body > atr * engulfMin and low <= ta.lowest(low, pinCtx) and volOK
-bearEngulf = useEngulf and confirmed and close < open and close[1] > open[1] and close < low[1] and body > atr * engulfMin and high >= ta.highest(high, pinCtx) and volOK
-plotshape(bullEngulf, title="Avalement haussier", style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="ENG", textcolor=color.white, size=size.tiny)
-plotshape(bearEngulf, title="Avalement baissier", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0),   text="ENG", textcolor=color.white, size=size.tiny)
+// ------------------- SIGNAL BOUGIE REGROUPÉ (UN seul, directionnel) ----------
+rng = high - low
+atLow  = low  <= ta.lowest(low,  candleCtx)
+atHigh = high >= ta.highest(high, candleCtx)
+rangeOK = rng >= atr * rangeATR
+cVolOK = not candleVol or volume > ta.sma(volume, volLen) * volMult
+closeUp = rng > 0 and (close - low) / rng >= closePos
+closeDn = rng > 0 and (high - close) / rng >= closePos
+rsiBuyOK  = not candleRsi or r <= osLvl
+rsiSellOK = not candleRsi or r >= obLvl
+candleBull = useCandle and confirmed and atLow and rangeOK and cVolOK and closeUp and rsiBuyOK
+candleBear = useCandle and confirmed and atHigh and rangeOK and cVolOK and closeDn and rsiSellOK
+plotshape(candleBull, title="Signal bougie HAUSSIER", style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="▲", textcolor=color.white, size=size.small)
+plotshape(candleBear, title="Signal bougie BAISSIER", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="▼", textcolor=color.white, size=size.small)
 
-atLow  = low  <= ta.lowest(low,  pinCtx)
-atHigh = high >= ta.highest(high, pinCtx)
-hammer = usePin and confirmed and (high - low) >= atr and dnWick > body * pinRatio and upWick < body and atLow
-star   = usePin and confirmed and (high - low) >= atr and upWick > body * pinRatio and dnWick < body and atHigh
-plotshape(hammer, title="Marteau", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny)
-plotshape(star,   title="Étoile filante", style=shape.triangledown, location=location.abovebar, color=color.new(color.orange, 0), size=size.tiny)
-
-
-// ------------------------ TABLEAU (sans bloc 'if') ---------------------------
+// ------------------------------- TABLEAU -------------------------------------
+candleState = candleBull ? "HAUSSIER ▲" : candleBear ? "BAISSIER ▼" : "—"
+candleCol   = candleBull ? color.green : candleBear ? color.red : color.gray
 bias = bullDrives > bearDrives ? "Haussier" : bearDrives > bullDrives ? "Baissier" : "Neutre"
 bcol = bullDrives > bearDrives ? color.green : bearDrives > bullDrives ? color.red : color.gray
 rcol = r >= obLvl ? color.red : r <= osLvl ? color.green : color.white
@@ -105,19 +100,15 @@ var table t = table.new(position.top_right, 2, 4, border_width=1, frame_color=co
 tShow = showPanel and barstate.islast
 table.cell(t, 0, 0, tShow ? "RSI" : "", text_color=color.white, bgcolor=tShow ? color.new(color.gray, 30) : color.new(color.gray, 100))
 table.cell(t, 1, 0, tShow ? str.tostring(r, "0") : "", text_color=rcol)
-table.cell(t, 0, 1, tShow ? "Poussées haussières" : "", text_color=color.white)
-table.cell(t, 1, 1, tShow ? str.tostring(bullDrives) + " / " + str.tostring(drives) : "", text_color=color.green)
-table.cell(t, 0, 2, tShow ? "Poussées baissières" : "", text_color=color.white)
-table.cell(t, 1, 2, tShow ? str.tostring(bearDrives) + " / " + str.tostring(drives) : "", text_color=color.red)
-table.cell(t, 0, 3, tShow ? "Biais" : "", text_color=color.white)
-table.cell(t, 1, 3, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
+table.cell(t, 0, 1, tShow ? "Poussées ▲ / ▼" : "", text_color=color.white)
+table.cell(t, 1, 1, tShow ? str.tostring(bullDrives) + " / " + str.tostring(bearDrives) : "", text_color=color.white)
+table.cell(t, 0, 2, tShow ? "Biais divergence" : "", text_color=color.white)
+table.cell(t, 1, 2, tShow ? bias : "", text_color=color.white, bgcolor=tShow ? color.new(bcol, 40) : color.new(color.gray, 100))
+table.cell(t, 0, 3, tShow ? "Signal bougie" : "", text_color=color.white)
+table.cell(t, 1, 3, tShow ? candleState : "", text_color=color.white, bgcolor=tShow ? color.new(candleCol, 40) : color.new(color.gray, 100))
 
 // -------------------------------- ALERTES ------------------------------------
-alertcondition(tripleBuy,  "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
-alertcondition(tripleSell, "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
-alertcondition(bullDiv,    "Divergence haussière",   "Divergence RSI haussiere")
-alertcondition(bearDiv,    "Divergence baissière",   "Divergence RSI baissiere")
-alertcondition(bullEngulf, "Avalement haussier",     "Bullish engulfing")
-alertcondition(bearEngulf, "Avalement baissier",     "Bearish engulfing")
-alertcondition(hammer,     "Marteau",                "Marteau a un creux local")
-alertcondition(star,       "Étoile filante",         "Etoile filante a un sommet local")
+alertcondition(tripleBuy,   "Triple divergence BUY",  "TRIPLE divergence haussiere confirmee")
+alertcondition(tripleSell,  "Triple divergence SELL", "TRIPLE divergence baissiere confirmee")
+alertcondition(candleBull,  "Signal bougie HAUSSIER", "Bougie : retournement haussier confirme")
+alertcondition(candleBear,  "Signal bougie BAISSIER", "Bougie : retournement baissier confirme")
