@@ -36,6 +36,14 @@ volMult    = input.float(1.5, "Volume fort: x la moyenne", minval=0.1, step=0.1,
 sigThr     = input.float(3.0, "Seuil de signal (force minimale)", minval=1.0, step=0.5, group=gB)
 cooldown   = input.int(6, "Anti-rafale: barres min entre signaux", minval=0, group=gB)
 
+gF = "Filtres (affiner / réduire les signaux)"
+minCtx     = input.int(1, "Contexte minimum (extrême/RSI/volume sur 3)", minval=0, maxval=3, group=gF)
+minBodyAtr = input.float(0.6, "Corps minimum de la bougie (x ATR)", minval=0.0, step=0.1, group=gF)
+reqExtreme = input.bool(true, "Uniquement sur extrême local", group=gF)
+reqVol     = input.bool(false, "Exiger un volume fort", group=gF)
+reqRsi     = input.bool(false, "Exiger le RSI en zone (survente/surachat)", group=gF)
+domMargin  = input.float(2.0, "Dominance min du sens (net vs sens opposé)", minval=0.0, step=0.5, group=gF)
+
 gM = "Réussite mesurée"
 horizon    = input.int(10, "Horizon de mesure (barres après le signal)", minval=1, group=gM)
 
@@ -119,8 +127,10 @@ bullScore = bullVotes > 0 ? bullVotes + ctxBull : 0.0
 bearScore = bearVotes > 0 ? bearVotes + ctxBear : 0.0
 net = bullScore - bearScore
 
-rawBull = useCandle and confirmed and net >= sigThr
-rawBear = useCandle and confirmed and net <= -sigThr
+fBull = ctxBull >= minCtx and body >= atr * minBodyAtr and (not reqExtreme or atLow) and (not reqVol or (volHi and b)) and (not reqRsi or r <= osLvl) and (bullScore - bearScore) >= domMargin
+fBear = ctxBear >= minCtx and body >= atr * minBodyAtr and (not reqExtreme or atHigh) and (not reqVol or (volHi and s)) and (not reqRsi or r >= obLvl) and (bearScore - bullScore) >= domMargin
+rawBull = useCandle and confirmed and net >= sigThr and fBull
+rawBear = useCandle and confirmed and net <= -sigThr and fBear
 var int lastSig = na
 sinceSig = na(lastSig) ? 1000000 : (bar_index - lastSig)
 sigBull = rawBull and sinceSig > cooldown
