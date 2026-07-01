@@ -11,7 +11,7 @@
 //  REUSSITE MESUREE : l'indicateur compte, sur tout l'historique, combien de fois
 //  son signal a vu juste H barres plus tard (vrai taux, pas un % invente).
 // =============================================================================
-indicator("Triple Div RSI + Chandeliers Quant", shorttitle="3Div+Candles", overlay=true, max_labels_count=500)
+indicator("Triple Div RSI + Chandeliers Quant", shorttitle="3Div+Candles", overlay=true, max_labels_count=500, max_lines_count=500)
 
 // ------------------------------- RÉGLAGES ------------------------------------
 gD = "Triple divergence RSI"
@@ -25,7 +25,8 @@ drvWin     = input.int(150,"Fenêtre max des poussées", minval=10, group=gD)
 useOBOS    = input.bool(true, "Filtre RSI survente/surachat", group=gD)
 osLvl      = input.int(40, "Seuil survente", group=gD)
 obLvl      = input.int(60, "Seuil surachat", group=gD)
-onlyTriple = input.bool(true, "Divergence: afficher SEULEMENT le triple", group=gD)
+onlyTriple = input.bool(false, "Divergence: afficher SEULEMENT le triple", group=gD)
+showDiv    = input.bool(true, "Divergence: lignes reliant les pivots + compteur", group=gD)
 
 gB = "Moteur de chandeliers (quant)"
 useCandle  = input.bool(true, "Activer le moteur de chandeliers", group=gB)
@@ -59,8 +60,10 @@ plF = not na(ta.pivotlow(r, lbL, lbR))
 phF = not na(ta.pivothigh(r, lbL, lbR))
 prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
 prevLow     = ta.valuewhen(plF, low[lbR], 1)
+prevLowBar  = ta.valuewhen(plF, bar_index - lbR, 1)
 prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
 prevHigh    = ta.valuewhen(phF, high[lbR], 1)
+prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
 gapBull = ta.barssince(plF[1])
 gapBear = ta.barssince(phF[1])
 bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= divMin and gapBull <= divMax and (not useOBOS or prevRSIlow <= osLvl)
@@ -79,12 +82,15 @@ bullDrives := tripleBuy ? 0 : (bearDiv ? 0 : newBull)
 bearDrives := tripleSell ? 0 : (bullDiv ? 0 : newBear)
 lastBullBar := bullDiv ? bar_index : lastBullBar
 lastBearBar := bearDiv ? bar_index : lastBearBar
-minorBull = bullDiv and not tripleBuy and not onlyTriple
-minorBear = bearDiv and not tripleSell and not onlyTriple
-plotshape(minorBull, title="Divergence haussière", style=shape.circle, location=location.belowbar, color=color.new(color.green, 55), size=size.tiny)
-plotshape(minorBear, title="Divergence baissière", style=shape.circle, location=location.abovebar, color=color.new(color.red, 55), size=size.tiny)
-plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(#089981, 0), text="BUY",  textcolor=color.white, size=size.small)
-plotshape(tripleSell, title="TRIPLE SELL", style=shape.labeldown, location=location.abovebar, color=color.new(#f23645, 0), text="SELL", textcolor=color.white, size=size.small)
+// Compteur de poussées visible (1 -> 2 -> 3 -> TRIPLE) + ligne reliant les pivots (comme la v1 que tu aimais)
+showBull = showDiv and bullDiv and (not onlyTriple or tripleBuy)
+showBear = showDiv and bearDiv and (not onlyTriple or tripleSell)
+lineBull = showBull and not na(prevLowBar)
+lineBear = showBear and not na(prevHighBar)
+lnB = lineBull ? line.new(int(prevLowBar),  prevLow,  bar_index - lbR, low[lbR],  color=color.new(color.green, 0), width=1) : na
+lnS = lineBear ? line.new(int(prevHighBar), prevHigh, bar_index - lbR, high[lbR], color=color.new(color.red, 0),   width=1) : na
+lbB = showBull ? label.new(bar_index - lbR, low[lbR],  tripleBuy  ? "TRIPLE\nBUY"  : str.tostring(newBull), style=label.style_label_up,   color=tripleBuy  ? color.new(#089981, 0) : color.new(color.green, 45), textcolor=color.white, size=tripleBuy  ? size.small : size.tiny) : na
+lbS = showBear ? label.new(bar_index - lbR, high[lbR], tripleSell ? "TRIPLE\nSELL" : str.tostring(newBear), style=label.style_label_down, color=tripleSell ? color.new(#f23645, 0) : color.new(color.red, 45),   textcolor=color.white, size=tripleSell ? size.small : size.tiny) : na
 
 // ===================== MOTEUR DE CHANDELIERS (figures) =======================
 b = close > open
