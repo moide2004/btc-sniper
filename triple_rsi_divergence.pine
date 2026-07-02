@@ -1,0 +1,86 @@
+//@version=5
+// =============================================================================
+//  TRIPLE RSI DIVERGENCE — Invalidation amelioree + RSI 50 + Alertes
+// -----------------------------------------------------------------------------
+//  Sous-fenetre RSI. Compte les divergences RSI<->prix successives (1 -> 2 -> 3).
+//  A la 3e poussee (reglable) -> signal fort TRIPLE BUY / TRIPLE SELL.
+//
+//  INVALIDATION AMELIOREE :
+//   - basee sur la ligne 50 : on ne cumule les poussees haussieres que tant que
+//     le RSI est SOUS 50 ; des que le RSI repasse au-dessus de 50 le mouvement est
+//     considere joue -> compteur haussier remis a 0. Symetrique au-dessus de 50.
+//   - cassure de structure : si le prix casse le pivot precedent dans le mauvais
+//     sens de plus de atrInval x ATR, la poussee partielle est jugee morte -> 0.
+//
+//  100% sans indentation (aucun 'if', aucune fonction multi-lignes) : survit au
+//  copier-coller. Dessins via ternaires ( cond ? line.new(...) : na ).
+// =============================================================================
+indicator("Triple RSI Divergence - Invalidation amelioree + RSI 50 + Alertes", shorttitle="3xRSI Div", overlay=false, max_labels_count=500, max_lines_count=500)
+
+// ------------------------------- RÉGLAGES ------------------------------------
+gP = "Divergence RSI"
+rsiLen   = input.int(14,   "Longueur RSI", minval=2, group=gP)
+lbL      = input.int(8,    "Pivot gauche (barres)",  minval=1, group=gP)
+lbR      = input.int(8,    "Pivot droite (barres)",  minval=1, group=gP)
+minGap   = input.int(2,    "Distance min entre pivots (barres)", minval=1, group=gP)
+atrInval = input.float(0.5,"Invalidation: marge de cassure (x ATR)", minval=0.0, step=0.1, group=gP)
+drives   = input.int(3,    "Poussées pour le TRIPLE", minval=2, maxval=6, group=gP)
+minDiv   = input.float(0.15,"Taille min de la divergence (x ATR)", minval=0.0, step=0.05, group=gP)
+
+gI = "Affichage"
+showLines = input.bool(true, "Lignes reliant les pivots", group=gI)
+showCount = input.bool(true, "Compteur numéroté (1,2,3)", group=gI)
+
+// ------------------------------- CALCULS -------------------------------------
+r   = ta.rsi(close, rsiLen)
+atr = ta.atr(14)
+plot(r, "RSI", color=color.new(#7e57c2, 0), linewidth=2)
+hline(70, "70", color=color.new(color.gray, 60), linestyle=hline.style_dotted)
+hline(50, "50 (médiane)", color=color.new(color.gray, 20), linestyle=hline.style_solid)
+hline(30, "30", color=color.new(color.gray, 60), linestyle=hline.style_dotted)
+
+// ------------------------- DÉTECTION DES DIVERGENCES -------------------------
+plF = not na(ta.pivotlow(r, lbL, lbR))
+phF = not na(ta.pivothigh(r, lbL, lbR))
+prevRSIlow  = ta.valuewhen(plF, r[lbR], 1)
+prevLow     = ta.valuewhen(plF, low[lbR], 1)
+prevLowBar  = ta.valuewhen(plF, bar_index - lbR, 1)
+prevRSIhigh = ta.valuewhen(phF, r[lbR], 1)
+prevHigh    = ta.valuewhen(phF, high[lbR], 1)
+prevHighBar = ta.valuewhen(phF, bar_index - lbR, 1)
+gapBull = ta.barssince(plF[1])
+gapBear = ta.barssince(phF[1])
+bullDiv = plF and r[lbR] > prevRSIlow and low[lbR] < prevLow and gapBull >= minGap and (prevLow - low[lbR]) >= atr * minDiv
+bearDiv = phF and r[lbR] < prevRSIhigh and high[lbR] > prevHigh and gapBear >= minGap and (high[lbR] - prevHigh) >= atr * minDiv
+
+// ---------------- COMPTEUR DE POUSSÉES + INVALIDATION (RSI 50) ---------------
+crossUp50 = ta.crossover(r, 50)
+crossDn50 = ta.crossunder(r, 50)
+breakBull = not na(prevLow)  and low  < prevLow  - atr * atrInval
+breakBear = not na(prevHigh) and high > prevHigh + atr * atrInval
+invalBull = crossUp50 or breakBull
+invalBear = crossDn50 or breakBear
+var int bullDrives = 0
+var int bearDrives = 0
+newBull = bullDiv ? bullDrives + 1 : bullDrives
+newBear = bearDiv ? bearDrives + 1 : bearDrives
+tripleBuy  = bullDiv and newBull >= drives
+tripleSell = bearDiv and newBear >= drives
+bullDrives := tripleBuy ? 0 : invalBull ? 0 : bearDiv ? 0 : newBull
+bearDrives := tripleSell ? 0 : invalBear ? 0 : bullDiv ? 0 : newBear
+
+// ------------------------------- DESSINS -------------------------------------
+lineBull = showLines and bullDiv and not na(prevLowBar)
+lineBear = showLines and bearDiv and not na(prevHighBar)
+lnB = lineBull ? line.new(int(prevLowBar),  prevRSIlow,  bar_index - lbR, r[lbR], color=color.new(color.green, 0), width=1) : na
+lnS = lineBear ? line.new(int(prevHighBar), prevRSIhigh, bar_index - lbR, r[lbR], color=color.new(color.red, 0),   width=1) : na
+lblB = (showCount and bullDiv) ? label.new(bar_index - lbR, r[lbR], tripleBuy  ? "TRIPLE\nBUY"  : str.tostring(newBull), style=label.style_label_up,   color=tripleBuy  ? color.new(#089981, 0) : color.new(color.green, 45), textcolor=color.white, size=tripleBuy  ? size.small : size.tiny) : na
+lblS = (showCount and bearDiv) ? label.new(bar_index - lbR, r[lbR], tripleSell ? "TRIPLE\nSELL" : str.tostring(newBear), style=label.style_label_down, color=tripleSell ? color.new(#f23645, 0) : color.new(color.red, 45),   textcolor=color.white, size=tripleSell ? size.small : size.tiny) : na
+plotshape(tripleBuy,  title="TRIPLE BUY",  style=shape.triangleup,   location=location.bottom, color=color.new(#089981, 0), size=size.tiny)
+plotshape(tripleSell, title="TRIPLE SELL", style=shape.triangledown, location=location.top,    color=color.new(#f23645, 0), size=size.tiny)
+
+// -------------------------------- ALERTES ------------------------------------
+alertcondition(tripleBuy,  "TRIPLE BUY",           "TRIPLE divergence RSI haussiere confirmee")
+alertcondition(tripleSell, "TRIPLE SELL",          "TRIPLE divergence RSI baissiere confirmee")
+alertcondition(bullDiv,    "Divergence haussière", "Divergence RSI haussiere detectee")
+alertcondition(bearDiv,    "Divergence baissière", "Divergence RSI baissiere detectee")
