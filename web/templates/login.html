@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accès — Moteur BTC</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0f1115;color:#dfe3ea;
+         display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+    form{background:#171a21;padding:28px;border-radius:12px;width:min(90vw,320px)}
+    h1{font-size:16px;font-weight:600;margin:0 0 16px}
+    input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;
+          border:1px solid #2a2f3a;background:#0f1115;color:#dfe3ea;margin-bottom:12px}
+    button{width:100%;padding:10px;border:0;border-radius:8px;background:#3b5bdb;color:#fff;font-weight:600}
+    .err{color:#e57373;font-size:13px;margin-bottom:8px}
+  </style>
+</head>
+<body>
+  <form method="post">
+    <h1>Moteur de probabilités BTC</h1>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <input type="password" name="password" placeholder="Mot de passe" autofocus>
+    <button type="submit">Entrer</button>
+  </form>
+</body>
+</html>

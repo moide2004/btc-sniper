@@ -1,0 +1,19 @@
+# Secrets & config locale
+.env
+
+# Données applicatives et caches (LA source de vérité reste locale au serveur)
+data/moteur.db
+data/moteur.db-wal
+data/moteur.db-shm
+data/ohlcv/*.parquet
+backups/
+
+# Journaux rotatifs
+logs/*.log
+logs/*.log.*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

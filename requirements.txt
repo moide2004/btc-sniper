@@ -1,0 +1,13 @@
+# Moteur de probabilités BTC — dépendances épinglées (§2.6)
+# Python 3.11+ requis.
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+flask==3.0.3
+requests==2.32.3
+websocket-client==1.8.0
+arch==7.0.0
+# À VALIDER (§9) : moteur parquet requis par les caches OHLCV (§7.2). pandas ne
+# lit/écrit pas le parquet sans engine ; pyarrow est la référence. Non listé
+# dans le §2.6 d'origine — en attente d'accord (voir question §9 du rapport P1).
+pyarrow==16.1.0
