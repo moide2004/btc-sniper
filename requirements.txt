@@ -7,7 +7,7 @@ flask==3.0.3
 requests==2.32.3
 websocket-client==1.8.0
 arch==7.0.0
-# À VALIDER (§9) : moteur parquet requis par les caches OHLCV (§7.2). pandas ne
-# lit/écrit pas le parquet sans engine ; pyarrow est la référence. Non listé
-# dans le §2.6 d'origine — en attente d'accord (voir question §9 du rapport P1).
+# VALIDÉ (§9, option A) : moteur parquet requis par les caches OHLCV (§7.2) —
+# pandas ne lit/écrit pas le parquet sans engine ; pyarrow est la référence.
+# Ajout au §2.6 approuvé par l'humain (format parquet conservé).
 pyarrow==16.1.0
