@@ -1,0 +1,18 @@
+# Secrets — NE JAMAIS committer
+.env
+service_account*.json
+*-service-account*.json
+*credentials*.json
+gcp-key*.json
+keys/
+
+# Données locales générées par les phases 2/3
+inbox_devis/
+state.json
+suppliers.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

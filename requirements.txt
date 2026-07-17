@@ -1,0 +1,9 @@
+# CRM Fournisseurs Airlaid — dépendances
+# Phase 1 (CRM Google Sheets)
+gspread>=6.0
+google-auth>=2.0
+python-dotenv>=1.0
+
+# Phases 2/3 (relève des devis + pièces jointes) — utilisées plus tard
+openpyxl>=3.1   # lecture des devis .xlsx
+# imaplib / email : bibliothèque standard, rien à installer
