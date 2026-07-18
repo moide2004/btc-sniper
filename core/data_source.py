@@ -41,11 +41,12 @@ KLINE_COLS = ["open_time", "open", "high", "low", "close", "volume", "close_time
 TF_MS = {
     "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
     "1h": 3_600_000, "4h": 14_400_000, "12h": 43_200_000, "1D": 86_400_000,
+    "1W": 604_800_000, "2W": 1_209_600_000, "1M": 2_592_000_000,  # 1M ≈ 30 j (échelle σ)
 }
 # Règle pandas de ré-échantillonnage (bornes gauche, label gauche).
 TF_PANDAS = {
     "5m": "5min", "15m": "15min", "30m": "30min",
-    "1h": "1h", "4h": "4h", "12h": "12h", "1D": "1D",
+    "1h": "1h", "4h": "4h", "12h": "12h", "1D": "24h",  # 24h : Tick-like, aligné minuit UTC
 }
 
 
@@ -160,6 +161,46 @@ def resample_1m(df_1m: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     last_1m_open = int(df_1m["open_time"].iloc[-1])
     complete = out["open_time"] + TF_MS[timeframe] - 1 <= last_1m_open + MINUTE_MS - 1
     return out[complete].reset_index(drop=True)
+
+
+# Lundi de référence pour ancrer les semaines (comme les klines hebdo Binance).
+_MONDAY_ANCHOR = "2017-01-02"
+
+
+def resample_from_1d(df_1d: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Agrège le 1D en 1W / 2W / 1M (§2.3). Hebdo ancré au lundi (aligné
+    Binance), mensuel = mois calendaire UTC. Ne renvoie que des bougies
+    COMPLÈTES (zéro look-ahead)."""
+    if df_1d is None or df_1d.empty:
+        return _empty_klines()
+    d = df_1d.copy()
+    d["ts"] = pd.to_datetime(d["open_time"], unit="ms", utc=True)
+    d = d.set_index("ts").sort_index()
+    agg_kwargs = dict(
+        open=("open", "first"), high=("high", "max"), low=("low", "min"),
+        close=("close", "last"), volume=("volume", "sum"),
+    )
+    if timeframe == "1M":
+        agg = d.resample("MS", label="left", closed="left").agg(**agg_kwargs)
+    elif timeframe in ("1W", "2W"):
+        rule = "168h" if timeframe == "1W" else "336h"  # 7j / 14j en heures (Tick-like)
+        origin = pd.Timestamp(_MONDAY_ANCHOR, tz="UTC")
+        agg = d.resample(rule, label="left", closed="left", origin=origin).agg(**agg_kwargs)
+    else:
+        raise ValueError(f"resample_from_1d ne gère que 1W/2W/1M : {timeframe}")
+
+    agg = agg.dropna(subset=["open"]).reset_index()
+    agg["open_time"] = (agg["ts"].astype("int64") // 1_000_000).astype("int64")
+    if timeframe == "1M":
+        nxt = agg["ts"] + pd.offsets.MonthBegin(1)
+        agg["close_time"] = (nxt.astype("int64") // 1_000_000 - 1).astype("int64")
+    else:
+        agg["close_time"] = agg["open_time"] + TF_MS[timeframe] - 1
+    out = agg[KLINE_COLS]
+
+    # Ne garder que les périodes entièrement couvertes par du 1D.
+    last_1d_close = int(df_1d["close_time"].iloc[-1])
+    return out[out["close_time"] <= last_1d_close].reset_index(drop=True)
 
 
 # ===========================================================================

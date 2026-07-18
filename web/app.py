@@ -147,11 +147,16 @@ def api_livre():
 @app.route("/api/probas")
 @login_required
 def api_probas():
-    # P1 : ossature. Matrice 11 timeframes alimentée en P2.
-    return jsonify({
-        "generated_at": utc_now_iso(),
-        "timeframes": [], "note": "Matrice alimentée en P2 (moteur statistique).",
-    })
+    # Matrice des 11 timeframes (§5) — snapshot calculé par le cycle quotidien.
+    import json
+    with _read_store() as st:
+        raw = st.get_kv("matrix_latest")
+    if not raw:
+        return jsonify({"generated_at": utc_now_iso(), "timeframes": [],
+                        "note": "Matrice pas encore calculée — lancer daily_update.py."})
+    data = json.loads(raw)
+    data["served_at"] = utc_now_iso()
+    return jsonify(data)
 
 
 if __name__ == "__main__":

@@ -24,22 +24,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import json  # noqa: E402
+
 from core.config import CONFIG  # noqa: E402
 from core.data_source import (  # noqa: E402
     DataSource, count_duplicates, find_gaps, load_ohlcv,
-    resample_1m, save_ohlcv_atomic, TF_MS,
+    resample_1m, resample_from_1d, save_ohlcv_atomic, TF_MS,
 )
 from core.logging_setup import get_logger  # noqa: E402
-from core.store import Store  # noqa: E402
+from core.proba_engine import compute_matrix  # noqa: E402
+from core.states import daily_sma200_ref  # noqa: E402
+from core.store import Store, utc_now_iso  # noqa: E402
 
 log = get_logger("daily")
 
 # Agrégations natives (≤1D depuis 1m ; 1W/2W/1M depuis 1D — §2.3).
 RESAMPLE_FROM_1M = ["5m", "15m", "30m", "1h", "4h", "12h", "1D"]
+RESAMPLE_FROM_1D = ["1W", "2W", "1M"]
 
 
 def rebuild_timeframes() -> dict[str, int]:
-    """Reconstruit les caches ≤ 1D depuis le 1m. Retourne le nb de bougies/TF."""
+    """Reconstruit les caches ≤ 1D depuis le 1m, puis 1W/2W/1M depuis le 1D
+    (§2.3). Retourne le nb de bougies/TF."""
     df_1m = load_ohlcv("1m")
     counts = {"1m": len(df_1m)}
     if df_1m.empty:
@@ -49,10 +55,28 @@ def rebuild_timeframes() -> dict[str, int]:
         agg = resample_1m(df_1m, tf)
         save_ohlcv_atomic(agg, tf)
         counts[tf] = len(agg)
-        # Libération mémoire : dataframe intermédiaire non conservé (§2.5).
+        del agg  # libération mémoire (§2.5)
+    df_1d = load_ohlcv("1D")
+    for tf in RESAMPLE_FROM_1D:
+        agg = resample_from_1d(df_1d, tf)
+        save_ohlcv_atomic(agg, tf)
+        counts[tf] = len(agg)
         del agg
     log.info("Ré-échantillonnage : " + ", ".join(f"{k}={v}" for k, v in counts.items()))
     return counts
+
+
+def compute_and_store_matrix(store: Store) -> int:
+    """Calcule la matrice des 11 timeframes (§5) et la stocke (snapshot lu par
+    la web app). Retourne le nombre de cases candidates."""
+    df_1d = load_ohlcv("1D")
+    daily_ref = daily_sma200_ref(df_1d)
+    matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker)
+    payload = {"generated_at": utc_now_iso(), "timeframes": matrix}
+    store.set_kv("matrix_latest", json.dumps(payload))
+    candidates = sum(1 for tf in matrix if tf.get("candidate"))
+    log.info(f"Matrice calculée : {len(matrix)} timeframes, {candidates} candidate(s)")
+    return candidates
 
 
 def check_clock_skew(ds: DataSource, store: Store) -> float | None:
@@ -113,6 +137,14 @@ def main() -> None:
     gaps = len(find_gaps(df_1m))
     dups = count_duplicates(df_1m)
     skew = check_clock_skew(ds, store)
+
+    # Moteur statistique (§5) : calcul + stockage de la matrice.
+    try:
+        candidates = compute_and_store_matrix(store)
+    except Exception as e:  # une erreur de calcul ne doit pas casser le cycle
+        candidates = 0
+        log.error(f"Calcul de la matrice échoué : {e!r}")
+        store.add_event("worker", "error", f"Calcul matrice échoué : {e}")
 
     duration = time.time() - t0
     ru = resource.getrusage(resource.RUSAGE_SELF)

@@ -63,6 +63,74 @@ class CurrentState:
         return f"{self.regime}/{self.extension}"
 
 
+# Timeframes dont le régime vient de la SMA200 QUOTIDIENNE (≤ 1D, §4) vs
+# celles dont le régime vient du momentum 26 périodes (≥ 1W).
+MOMENTUM_TF = {"1W", "2W", "1M"}
+
+
+def daily_sma200_ref(daily_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Prépare la référence de régime ≤ 1D : (close_time, SMA200) du 1D.
+    Le régime d'une bougie utilise la SMA200 du DERNIER JOUR COMPLÉTÉ
+    (zéro look-ahead, §4)."""
+    if daily_df is None or daily_df.empty:
+        return np.array([], dtype="int64"), np.array([], dtype="float64")
+    d = daily_df.sort_values("open_time").reset_index(drop=True)
+    sma = d["close"].astype("float64").rolling(200, min_periods=200).mean()
+    return d["close_time"].to_numpy("int64"), sma.to_numpy("float64")
+
+
+def _regime_le_1d(df: pd.DataFrame, daily_ref: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    """Régime bull/bear par barre via SMA200 du dernier jour complété."""
+    day_ct, day_sma = daily_ref
+    n = len(df)
+    out = np.full(n, "inconnu", dtype=object)
+    if len(day_ct) == 0:
+        return out
+    ot = df["open_time"].to_numpy("int64")
+    close = df["close"].to_numpy("float64")
+    # dernier jour dont close_time < open_time de la barre
+    idx = np.searchsorted(day_ct, ot, side="left") - 1
+    for i in range(n):
+        j = idx[i]
+        if j < 0 or np.isnan(day_sma[j]):
+            continue
+        out[i] = "bull" if close[i] > day_sma[j] else "bear"
+    return out
+
+
+def _regime_ge_1w(df: pd.DataFrame) -> np.ndarray:
+    """Régime bull/bear par barre via momentum 26 périodes (§4)."""
+    mom = momentum(df["close"].astype("float64"), 26).to_numpy("float64")
+    out = np.full(len(df), "inconnu", dtype=object)
+    out[mom > 0] = "bull"
+    out[mom < 0] = "bear"
+    out[np.isnan(mom)] = "inconnu"
+    return out
+
+
+def _extension_series(df: pd.DataFrame) -> np.ndarray:
+    r = rsi(df["close"].astype("float64")).to_numpy("float64")
+    out = np.full(len(df), "inconnu", dtype=object)
+    out[r < 30] = "survendu"
+    out[(r >= 30) & (r <= 70)] = "neutre"
+    out[r > 70] = "surachete"
+    out[np.isnan(r)] = "inconnu"
+    return out
+
+
+def state_labels(
+    df: pd.DataFrame, timeframe: str, daily_ref: tuple[np.ndarray, np.ndarray]
+) -> tuple[np.ndarray, str]:
+    """Étiquette chaque barre par son état « régime/extension » (§4) et renvoie
+    (labels, état_courant)."""
+    if df is None or df.empty:
+        return np.array([], dtype=object), "inconnu/inconnu"
+    regime = _regime_ge_1w(df) if timeframe in MOMENTUM_TF else _regime_le_1d(df, daily_ref)
+    ext = _extension_series(df)
+    labels = np.array([f"{r}/{e}" for r, e in zip(regime, ext)], dtype=object)
+    return labels, str(labels[-1])
+
+
 def current_state(df: pd.DataFrame, timeframe: str, use_momentum: bool = False) -> CurrentState:
     """État courant d'une timeframe à partir de ses bougies CLÔTURÉES.
 

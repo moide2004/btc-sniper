@@ -70,6 +70,48 @@ async function refreshLivre() {
   try { await getJSON("/api/livre"); } catch (e) {}
 }
 
-refreshHealth(); refreshEvents(); refreshLivre();
+function pct(x) { return (x === null || x === undefined || isNaN(x)) ? "—" : (100 * x).toFixed(1) + " %"; }
+function num(x, d = 2) { return (x === null || x === undefined || isNaN(x)) ? "—" : Number(x).toFixed(d); }
+
+function dirRow(label, d) {
+  if (!d) return "";
+  const fh = d.horizon_fixe || {};
+  const w = fh.wilson || {};
+  const best = d.best;
+  const ev = best ? num(best.ev_nette_prudente) + " R" : "—";
+  const evOk = best && best.ev_nette_prudente > 0;
+  const cls = d.candidate ? "ok" : "no";
+  const pill = d.candidate ? "candidate" : (d.motifs && d.motifs[0] ? d.motifs[0] : "—");
+  return `<div class="dir"><span class="lab">${label}</span>
+    <span>p̂ ${pct(fh.p_hat)} <span class="lab">[${pct(w.low)}–${pct(w.high)}]</span> · n=${fh.n ?? 0}</span></div>
+    <div class="dir"><span class="lab">EV nette prud. / meilleur RR</span>
+    <span>${ev} <span class="pill ${cls}">${pill}</span></span></div>`;
+}
+
+async function refreshMatrix() {
+  try {
+    const d = await getJSON("/api/probas");
+    if (!d) return;
+    document.getElementById("mtx-gen").textContent =
+      d.timeframes.length ? ("calculée " + (d.generated_at || "")) : (d.note || "—");
+    const box = document.getElementById("matrix");
+    if (!d.timeframes.length) { box.innerHTML = `<div class="muted">${d.note || "Aucune donnée."}</div>`; return; }
+    box.innerHTML = d.timeframes.map(tf => {
+      if (tf.insuffisant) return `<div class="tf grey"><h3>${tf.timeframe}</h3><div class="muted">historique insuffisant</div></div>`;
+      const c = tf.couts && tf.couts.taker ? tf.couts.taker : {};
+      const cand = tf.candidate ? "cand" : "";
+      const grey = (!tf.long.candidate && !tf.short.candidate) ? "grey" : "";
+      return `<div class="tf ${cand} ${grey}">
+        <h3><span>${tf.timeframe}</span><span class="st">${tf.etat} · n=${tf.n_etat}</span></h3>
+        ${dirRow("Long", tf.long)}
+        ${dirRow("Short", tf.short)}
+        <div class="cost">coûts (taker) : ${c.verdict || "—"} · c/σ=${pct(c.cost_pct_sigma)}</div>
+      </div>`;
+    }).join("");
+  } catch (e) { /* réessai au prochain tick */ }
+}
+
+refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix();
 setInterval(refreshLivre, 5000);           // §6.3
 setInterval(() => { refreshHealth(); refreshEvents(); }, 15000);
+setInterval(refreshMatrix, 15000);
