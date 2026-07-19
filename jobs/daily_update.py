@@ -45,25 +45,61 @@ RESAMPLE_FROM_1M = ["5m", "15m", "30m", "1h", "4h", "12h", "1D"]
 RESAMPLE_FROM_1D = ["1W", "2W", "1M"]
 
 
-def rebuild_timeframes() -> dict[str, int]:
-    """Reconstruit les caches ≤ 1D depuis le 1m, puis 1W/2W/1M depuis le 1D
-    (§2.3). Retourne le nb de bougies/TF."""
+def rebuild_timeframes(store: Store | None = None) -> dict[str, int]:
+    """Reconstruit les caches (§2.3) : là où le 1m existe, il est LA vérité de
+    prix ; AVANT lui, historique NATIF (Binance, depuis 2017) pour les grosses
+    échelles 1h/4h/12h/1D — puis 1W/2W/1M agrégées du 1D combiné.
+    Retourne le nb de bougies/TF."""
+    from core.data_source import (combine_native_recent, ensure_native_history,
+                                  load_native)
+
     df_1m = load_ohlcv("1m")
     counts = {"1m": len(df_1m)}
     if df_1m.empty:
         log.warning("Cache 1m vide : rien à ré-échantillonner")
         return counts
-    for tf in RESAMPLE_FROM_1M:
+
+    # Historique profond (téléchargé une fois ; échec → poursuite sur 1m seul).
+    ensure_native_history(logger=log, store=store)
+
+    # Échelles fines : 1m uniquement (le natif minute profond n'apporte rien
+    # de plus aux n déjà énormes, et pèserait des millions de lignes).
+    for tf in ("5m", "15m", "30m"):
         agg = resample_1m(df_1m, tf)
         save_ohlcv_atomic(agg, tf)
         counts[tf] = len(agg)
         del agg  # libération mémoire (§2.5)
-    df_1d = load_ohlcv("1D")
-    for tf in RESAMPLE_FROM_1D:
-        agg = resample_from_1d(df_1d, tf)
+
+    # 1h : natif profond + récent depuis le 1m.
+    recent_1h = resample_1m(df_1m, "1h")
+    combined_1h = combine_native_recent(load_native("1h"), recent_1h)
+    save_ohlcv_atomic(combined_1h, "1h")
+    counts["1h"] = len(combined_1h)
+    del recent_1h
+
+    # 4h / 12h : agrégés du 1h combiné (partition exacte : 1m→1h→4h ≡ 1m→4h
+    # sur la période 1m ; natif 1h→4h avant).
+    for tf in ("4h", "12h"):
+        agg = resample_1m(combined_1h, tf, src_ms=TF_MS["1h"])
         save_ohlcv_atomic(agg, tf)
         counts[tf] = len(agg)
         del agg
+    del combined_1h
+
+    # 1D : natif profond + récent depuis le 1m.
+    recent_1d = resample_1m(df_1m, "1D")
+    combined_1d = combine_native_recent(load_native("1D"), recent_1d)
+    save_ohlcv_atomic(combined_1d, "1D")
+    counts["1D"] = len(combined_1d)
+    del df_1m, recent_1d
+
+    # 1W / 2W / 1M : agrégées du 1D combiné (§2.3).
+    for tf in RESAMPLE_FROM_1D:
+        agg = resample_from_1d(combined_1d, tf)
+        save_ohlcv_atomic(agg, tf)
+        counts[tf] = len(agg)
+        del agg
+    del combined_1d
     log.info("Ré-échantillonnage : " + ", ".join(f"{k}={v}" for k, v in counts.items()))
     return counts
 
@@ -269,7 +305,7 @@ def main() -> None:
     if filled:
         log.info(f"Trous comblés avant recalcul : {filled}")
 
-    counts = rebuild_timeframes()
+    counts = rebuild_timeframes(store)
     df_1m = load_ohlcv("1m")
     gaps = len(find_gaps(df_1m))
     dups = count_duplicates(df_1m)

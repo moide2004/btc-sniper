@@ -133,9 +133,11 @@ def count_duplicates(df: pd.DataFrame) -> int:
 # ===========================================================================
 # Ré-échantillonnage 1m -> timeframe supérieure (§2.3)
 # ===========================================================================
-def resample_1m(df_1m: pd.DataFrame, timeframe: str) -> pd.DataFrame:
-    """Agrège des bougies 1m en `timeframe` (OHLCV). Bornes UTC alignées sur
-    l'époque. Ne renvoie que des bougies COMPLÈTES (zéro look-ahead)."""
+def resample_1m(df_1m: pd.DataFrame, timeframe: str,
+                src_ms: int = MINUTE_MS) -> pd.DataFrame:
+    """Agrège des bougies (1m par défaut, ou toute granularité `src_ms`) en
+    `timeframe` (OHLCV). Bornes UTC alignées sur l'époque. Ne renvoie que des
+    bougies COMPLÈTES (zéro look-ahead)."""
     if timeframe == "1m":
         return df_1m.copy()
     if timeframe not in TF_PANDAS:
@@ -157,9 +159,10 @@ def resample_1m(df_1m: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     out["close_time"] = out["open_time"] + TF_MS[timeframe] - 1
     out = out[KLINE_COLS]
 
-    # Ne garder que les bougies dont l'intervalle complet est couvert par du 1m.
-    last_1m_open = int(df_1m["open_time"].iloc[-1])
-    complete = out["open_time"] + TF_MS[timeframe] - 1 <= last_1m_open + MINUTE_MS - 1
+    # Ne garder que les bougies dont l'intervalle complet est couvert par la
+    # source (granularité src_ms).
+    last_src_open = int(df_1m["open_time"].iloc[-1])
+    complete = out["open_time"] + TF_MS[timeframe] - 1 <= last_src_open + src_ms - 1
     return out[complete].reset_index(drop=True)
 
 
@@ -334,6 +337,110 @@ _SOURCE_REGISTRY = {
     "binance": BinanceRest, "kraken": KrakenRest,
     "coinbase": CoinbaseRest, "coingecko": CoinGeckoRest,
 }
+
+
+# ===========================================================================
+# Historique profond NATIF (§2.3 : « avant [le 1m] : natif »)
+# ===========================================================================
+# Intervalle Binance par timeframe profonde (les fines restent 1m-only).
+NATIVE_INTERVALS = {"1h": "1h", "1D": "1d"}
+# Naissance de BTCUSDT sur Binance.
+NATIVE_START_MS = 1_502_928_000_000  # 2017-08-17 00:00 UTC
+
+
+def fetch_native_klines(interval: str, start_ms: int, end_ms: int,
+                        tf_ms: int) -> pd.DataFrame:
+    """Klines natives Binance d'un intervalle donné (backfill profond)."""
+    rows = []
+    cursor = start_ms
+    while cursor <= end_ms:
+        r = requests.get(
+            "https://api.binance.com/api/v3/klines",
+            params={"symbol": CONFIG.symbol, "interval": interval,
+                    "startTime": cursor, "endTime": end_ms, "limit": 1000},
+            timeout=25)
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            break
+        for k in data:
+            rows.append((int(k[0]), float(k[1]), float(k[2]), float(k[3]),
+                         float(k[4]), float(k[5]), int(k[6])))
+        cursor = int(data[-1][0]) + tf_ms
+        if len(data) < 1000:
+            break
+        time.sleep(0.15)
+    return pd.DataFrame(rows, columns=KLINE_COLS) if rows else _empty_klines()
+
+
+def native_cache_path(timeframe: str) -> Path:
+    return CONFIG.ohlcv_dir / f"{CONFIG.symbol}_{timeframe}_native.parquet"
+
+
+def ensure_native_history(logger=None, store=None) -> dict[str, int]:
+    """Garantit les caches d'historique NATIF (1h et 1D) depuis la naissance du
+    symbole jusqu'au début de la couverture 1m (§2.3 « avant : natif »).
+    Statique : téléchargé UNE fois, réutilisé ensuite. Échec réseau → le
+    système continue sur le 1m seul (comme avant), avec un événement."""
+    first_1m = None
+    df_1m_head = load_ohlcv("1m")
+    if not df_1m_head.empty:
+        first_1m = int(df_1m_head["open_time"].iloc[0])
+    del df_1m_head
+    if first_1m is None:
+        return {}
+    counts: dict[str, int] = {}
+    for tf, interval in NATIVE_INTERVALS.items():
+        p = native_cache_path(tf)
+        if p.exists():
+            counts[tf] = len(pd.read_parquet(p))
+            continue
+        try:
+            df = fetch_native_klines(interval, NATIVE_START_MS, first_1m - 1,
+                                     TF_MS[tf])
+            # Sécurité : seulement des bougies ENTIÈREMENT antérieures au 1m.
+            df = df[df["close_time"] < first_1m].reset_index(drop=True)
+            if df.empty:
+                continue
+            tmp = p.with_suffix(p.suffix + f".tmp.{os.getpid()}")
+            df.to_parquet(tmp, index=False)
+            os.replace(tmp, p)  # écriture atomique (§7.2)
+            counts[tf] = len(df)
+            if logger:
+                logger.info(f"Historique natif {tf} : {len(df)} bougies "
+                            f"(2017→début du 1m)")
+            if store:
+                store.add_event("data_incident", "info",
+                                f"Historique profond {tf} récupéré : "
+                                f"{len(df)} bougies natives", {"tf": tf})
+        except Exception as e:
+            if logger:
+                logger.warning(f"Historique natif {tf} indisponible : {e!r}")
+            if store:
+                store.add_event("data_incident", "warning",
+                                f"Historique profond {tf} indisponible — "
+                                f"poursuite sur le 1m seul", {"tf": tf})
+    return counts
+
+
+def load_native(timeframe: str) -> pd.DataFrame:
+    p = native_cache_path(timeframe)
+    if not p.exists():
+        return _empty_klines()
+    return pd.read_parquet(p).sort_values("open_time").reset_index(drop=True)
+
+
+def combine_native_recent(native: pd.DataFrame, recent: pd.DataFrame) -> pd.DataFrame:
+    """Colle l'historique natif AVANT la période couverte par le 1m (qui reste
+    la seule vérité de prix là où il existe, §2.3)."""
+    if recent.empty:
+        return native.copy()
+    if native.empty:
+        return recent.copy()
+    first_recent = int(recent["open_time"].iloc[0])
+    head = native[native["open_time"] < first_recent]
+    out = pd.concat([head, recent], ignore_index=True)
+    return out.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
 
 
 def fetch_funding_annualized_7d(symbol: Optional[str] = None) -> Optional[float]:
