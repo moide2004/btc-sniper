@@ -559,6 +559,57 @@ def ensure_native_history(logger=None, store=None) -> dict[str, int]:
     return counts
 
 
+def backfill_deep_1m(logger=None, store=None, fetch_fn=None,
+                     start_ms: int = NATIVE_START_MS) -> int:
+    """Complète le cache 1m SEGMENTÉ vers le passé, mois par mois, depuis la
+    naissance du symbole (§2.3 : le 1m natif est la vérité de prix partout où
+    il existe). RÉSUMABLE : les mois déjà présents sont sautés ; interruption
+    sans perte (chaque mois est écrit atomiquement). Retourne le nb de bougies
+    ajoutées."""
+    fetch = fetch_fn or (lambda s, e: fetch_native_klines("1m", s, e, MINUTE_MS))
+    if not _is_segmented("1m"):
+        migrate_to_segments("1m", logger=logger)
+    segs = _segments("1m")
+    if not segs:
+        return 0  # cache vide : le backfill standard du worker s'en charge
+    existing = {p.stem for p in segs}
+    oldest = min(existing)
+
+    # Mois cibles : du début du symbole jusqu'au plus ancien mois existant
+    # INCLUS (son début peut être partiel : fusion + dédup le complètent).
+    months = pd.period_range(
+        pd.Timestamp(start_ms, unit="ms", tz="UTC").strftime("%Y-%m"),
+        oldest, freq="M")
+    added = 0
+    for per in months:
+        key = str(per)
+        if key in existing and key != oldest:
+            continue  # mois déjà complet (reprise)
+        m_start = max(start_ms, int(per.to_timestamp().tz_localize("UTC")
+                                    .timestamp() * 1000))
+        m_end = int((per + 1).to_timestamp().tz_localize("UTC")
+                    .timestamp() * 1000) - 1
+        try:
+            df = fetch(m_start, m_end)
+        except Exception as e:
+            if logger:
+                logger.warning(f"Backfill profond 1m {key} : {e!r} — reprise "
+                               f"possible en relançant")
+            break
+        if df.empty:
+            continue
+        append_ohlcv(df, "1m")
+        added += len(df)
+        if logger:
+            logger.info(f"Backfill profond 1m : {key} → {len(df)} bougies "
+                        f"(total +{added})")
+    if added and store:
+        store.add_event("data_incident", "info",
+                        f"Historique 1m profond : +{added} bougies natives "
+                        f"(mois {str(months[0])} → {oldest})", {"ajoutees": added})
+    return added
+
+
 def load_native(timeframe: str) -> pd.DataFrame:
     p = native_cache_path(timeframe)
     if not p.exists():

@@ -120,12 +120,48 @@ def test_migration():
           migrate_to_segments("1m") is False)
 
 
+def test_backfill_profond():
+    print("[5] Backfill 1m profond — résumable, mois par mois")
+    from core.data_source import backfill_deep_1m
+
+    # Cache actuel : ne démarre qu'au 15 janvier 2024 (mois partiel).
+    JAN15 = 1_705_276_800_000  # 2024-01-15 00:00 UTC
+    for s in SEG_DIR.glob("*.parquet"):
+        s.unlink()
+    save_ohlcv_atomic(make_1m(JAN15, 3 * 1440), "1m")
+
+    calls = []
+
+    def fake_fetch(start_ms, end_ms):
+        calls.append((start_ms, end_ms))
+        n = min(2 * 1440, int((end_ms - start_ms) // MINUTE_MS))
+        return make_1m(start_ms, n)  # 2 jours simulés par mois
+
+    added = backfill_deep_1m(fetch_fn=fake_fetch,
+                             start_ms=1_701_388_800_000)  # depuis 2023-12-01
+    check("mois 2023-12 et tête de 2024-01 téléchargés", len(calls) == 2,
+          f"{len(calls)} appel(s)")
+    check("bougies ajoutées", added > 0, f"+{added}")
+    segs = sorted(p.stem for p in SEG_DIR.glob("*.parquet"))
+    check("segments 2023-12 + 2024-01 présents", segs == ["2023-12", "2024-01"], str(segs))
+    df = load_ohlcv("1m")
+    check("aucun doublon après fusion du mois partiel",
+          df["open_time"].is_unique and df["open_time"].is_monotonic_increasing)
+    # Reprise : un 2e appel ne retélécharge que le mois le plus ancien (fusion).
+    calls.clear()
+    added2 = backfill_deep_1m(fetch_fn=fake_fetch, start_ms=1_701_388_800_000)
+    check("reprise : mois complets sautés", len(calls) == 1, f"{len(calls)} appel(s)")
+    check("reprise idempotente (aucune bougie nouvelle)",
+          len(load_ohlcv("1m")) == len(df), f"+{added2}")
+
+
 def main():
     print(f"Répertoire de test : {_TMP}\n")
     test_write_read()
     test_append()
     test_tail_and_last()
     test_migration()
+    test_backfill_profond()
     print(f"\nRésultat : {PASS} réussis, {FAIL} échoués")
     return 1 if FAIL else 0
 
