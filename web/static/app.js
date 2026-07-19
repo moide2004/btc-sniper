@@ -23,10 +23,13 @@ async function getJSON(url) {
   return r.json();
 }
 
+let healthFails = 0; // tolère UN raté réseau isolé avant de passer le bandeau en ⚠
+
 async function refreshHealth() {
   try {
     const h = await getJSON("/api/health");
     if (!h) return;
+    healthFails = 0;
     document.getElementById("src").textContent = h.source || "—";
     document.getElementById("age").textContent = fmtAge(h.heartbeat_age_s);
     document.getElementById("bars").textContent = (h.bars_1m || 0).toLocaleString("fr-FR");
@@ -48,6 +51,8 @@ async function refreshHealth() {
       wstatus.textContent = "✓ " + (h.worker ? h.worker.status : "ok");
     }
   } catch (e) {
+    healthFails += 1;
+    if (healthFails < 2) return; // un raté isolé : on garde l'état affiché
     const band = document.getElementById("band");
     band.classList.add("warn"); band.classList.remove("live");
     document.getElementById("livedot").querySelector("#livetxt").textContent = "⚠ hors ligne";

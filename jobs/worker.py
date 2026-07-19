@@ -77,6 +77,8 @@ class Worker:
         self._stop = threading.Event()
         self._switched_to_rest = False
 
+        self._last_beat = 0.0  # horodatage du dernier battement émis
+
         # --- Moteur d'étages (P4 : §5.8–§5.13) ---
         self.trader = PaperTrader(
             self.store,
@@ -88,17 +90,35 @@ class Worker:
         self._corr_cache: dict = {}
 
     # ----- Aides moteur d'étages -------------------------------------------
-    def _refresh_daily_ref(self) -> None:
+    def _beat_if_due(self, status: str = "ok") -> None:
+        """Émet le battement s'il est dû (§7.3 : toutes les 30 s) — appelé
+        AUSSI au milieu des phases lourdes pour que le bandeau ne passe pas
+        faussement en ⚠ pendant les clôtures d'étage ou un rejeu."""
+        now = time.time()
+        if now - self._last_beat >= CONFIG.heartbeat_seconds:
+            try:
+                self.store.write_heartbeat(self.cycle, self.active_source, status)
+                self._last_beat = now
+            except Exception as e:
+                log.error(f"Heartbeat : {e!r}")
+
+    def _refresh_daily_ref(self, df_1m=None) -> None:
         """(Re)calcule la référence de régime quotidienne depuis le 1m —
-        au démarrage puis à chaque nouveau jour UTC (zéro look-ahead §4)."""
+        au démarrage puis à chaque nouveau jour UTC (zéro look-ahead §4).
+        `df_1m` optionnel : réutilise un cache déjà chargé (évite une relecture
+        du parquet complet)."""
         today_ms = (utc_now_ms() // 86_400_000) * 86_400_000
         if self._daily_ref_cache and self._daily_ref_cache[1] == today_ms:
             return
-        df_1m = load_ohlcv("1m")
+        own_load = df_1m is None
+        if own_load:
+            df_1m = load_ohlcv("1m")
         d1d = resample_1m(df_1m, "1D")
         self._daily_ref_cache = (daily_sma200_ref(d1d), today_ms)
         self._daily_close_cache = d1d["close"].to_numpy("float64") if not d1d.empty else None
-        del df_1m, d1d  # RAM disciplinée (§2.5)
+        if own_load:
+            del df_1m
+        del d1d  # RAM disciplinée (§2.5)
 
     def _tables(self) -> dict:
         raw = self.store.get_kv("tables_latest")
@@ -131,8 +151,9 @@ class Worker:
         self.store.set_kv("verdicts_latest", json.dumps(
             {"generated_at": utc_now_iso(), **cards}))
 
-    def _stage_bars(self, stage: str, n_bars: int = 300):
-        df_1m = load_ohlcv("1m")
+    def _stage_bars(self, stage: str, n_bars: int = 300, df_1m=None):
+        if df_1m is None:
+            df_1m = load_ohlcv("1m")
         need = n_bars * (TF_MS[stage] // MINUTE_MS)
         return resample_1m(df_1m.tail(need), stage)
 
@@ -144,7 +165,7 @@ class Worker:
         cursor = int(self.store.get_kv("trader_1m_cursor", "0") or 0)
         stage_counts: dict[str, int] = {}
         last_ot = cursor
-        for row in sorted(rows, key=lambda r: r["open_time"]):
+        for i, row in enumerate(sorted(rows, key=lambda r: r["open_time"])):
             ot = int(row["open_time"])
             if ot <= cursor:
                 continue  # déjà traité (doublon du flux ou rejeu partiel)
@@ -154,13 +175,21 @@ class Worker:
             for stage in DECISION_STAGES:
                 if boundary % TF_MS[stage] == 0:
                     stage_counts[stage] = stage_counts.get(stage, 0) + 1
+            if i % 500 == 499:
+                self._beat_if_due()  # rejeu long : le battement continue (§7.3)
         if last_ot > cursor:
             self.store.set_kv("trader_1m_cursor", str(last_ot))
-        for stage, n_closes in stage_counts.items():
-            try:
-                self._on_stage_close(stage, n_closes)
-            except Exception as e:
-                log.error(f"Clôture d'étage {stage} : {e!r}")
+        if stage_counts:
+            # UNE seule lecture du cache 1m pour toutes les clôtures du lot.
+            df_1m = load_ohlcv("1m")
+            self._refresh_daily_ref(df_1m)
+            for stage, n_closes in stage_counts.items():
+                self._beat_if_due()  # phase lourde : battement maintenu
+                try:
+                    self._on_stage_close(stage, n_closes, df_1m)
+                except Exception as e:
+                    log.error(f"Clôture d'étage {stage} : {e!r}")
+            del df_1m
 
     def _replay_missed_candles(self) -> None:
         """Rejoue dans l'exécuteur les bougies écrites au cache pendant une
@@ -181,14 +210,14 @@ class Worker:
         log.info(f"Rejeu post-panne : {len(missed)} bougie(s) 1m vers l'exécuteur")
         self._process_new_candles(missed.to_dict("records"))
 
-    def _on_stage_close(self, stage: str, n_closes: int = 1) -> None:
+    def _on_stage_close(self, stage: str, n_closes: int = 1, df_1m=None) -> None:
         """À chaque clôture d'un étage de décision (1h/4h/1D) : invalidation,
         surveillance, puis décision (§5.8–§5.13). `n_closes` > 1 après une
         panne : les compteurs (3 bougies, cadence 25 lectures) rattrapent
         chaque clôture manquée ; la décision, elle, n'est prise qu'une fois,
         au présent."""
-        self._refresh_daily_ref()
-        df = self._stage_bars(stage)
+        self._refresh_daily_ref(df_1m)
+        df = self._stage_bars(stage, df_1m=df_1m)
         if df is None or len(df) < 20:
             return
         labels, current = state_labels(df, stage, self._daily_ref_cache[0])
@@ -288,6 +317,9 @@ class Worker:
     # ----- Reprise (§7.3) ---------------------------------------------------
     def startup_recovery(self) -> None:
         log.info("Démarrage worker : reprise de l'état persistant")
+        # Battement immédiat : le bandeau montre le redémarrage plutôt qu'un
+        # faux « worker absent » pendant un long backfill (§7.3).
+        self._beat_if_due()
         last = last_open_time("1m")
         if last is None:
             log.info(f"Cache 1m vide → backfill initial {CONFIG.backfill_days} j")
@@ -297,6 +329,7 @@ class Worker:
             added = self.ds.ensure_backfill(CONFIG.backfill_days)
             if added:
                 log.info(f"Comblé depuis le dernier point : {added} bougie(s)")
+        self._beat_if_due()
 
         filled = self.ds.fill_gaps()
         df = load_ohlcv("1m")
@@ -358,10 +391,8 @@ class Worker:
         stream_thread = threading.Thread(target=self.stream.run_forever, daemon=True)
         stream_thread.start()
 
-        last_beat = 0.0
         while not self._stop.is_set():
             self.cycle += 1
-            now = time.time()
             status = "ok"
             try:
                 self._drain_ws_signals()
@@ -413,12 +444,7 @@ class Worker:
                 status = "degraded"
 
             # Heartbeat toutes les HEARTBEAT_SECONDS (§7.3).
-            try:
-                if now - last_beat >= CONFIG.heartbeat_seconds:
-                    self.store.write_heartbeat(self.cycle, self.active_source, status)
-                    last_beat = now
-            except Exception as e:
-                log.error(f"Heartbeat : {e!r}")
+            self._beat_if_due(status)
 
             self._stop.wait(min(5, CONFIG.heartbeat_seconds))
 
