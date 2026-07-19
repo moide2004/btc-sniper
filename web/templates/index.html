@@ -90,7 +90,8 @@
     <p class="muted" style="margin-top:10px">Chaque case : état courant, p̂ [Wilson]
       des deux sens, n, EV nette prudente, verdict de coûts, badge walk-forward.
       Les candidates sont surlignées ; les cases refusées sont grisées avec leur
-      motif. Funding non intégré (F=0). Recalcul 1×/jour.
+      motif. Funding §5.14 : voir l'état dans la carte « Période de validation »
+      (F=0 + badge si indisponible). Recalcul 1×/jour.
       <b>Cliquer une carte</b> ouvre le détail de l'échelle (tous les états).</p>
   </div>
 
@@ -117,6 +118,22 @@
     <p class="muted" style="margin-top:8px">Exécution virtuelle uniquement — aucun
       ordre réel, jamais. Les tickets naissent aux clôtures 1h / 4h / 1D si une
       case est candidate ; fills simulés sur le flux 1m.</p>
+  </div>
+
+  <div class="card">
+    <div class="k" style="margin-bottom:8px">Période de validation P4 → bilan P5 ·
+      <span id="bilan-note" class="muted">—</span></div>
+    <div class="syn">
+      <div><div class="k">Jours</div><div class="big"><span id="bilan-jours">0</span>
+        <span class="muted">/ 60</span></div></div>
+      <div><div class="k">Trades papier</div><div class="big"><span id="bilan-trades">0</span>
+        <span class="muted">/ 100</span></div></div>
+      <div><div class="k">Funding (§5.14)</div><div class="big" id="bilan-funding">—</div></div>
+    </div>
+    <div id="bilan-etages" style="margin-top:10px;overflow-x:auto"></div>
+    <p class="muted" style="margin-top:8px">Le go/no-go final (P5) est une décision
+      humaine, instruite quand la période est atteinte (60 j OU 100 trades,
+      premier des deux). Rien ici n'est un conseil financier.</p>
   </div>
 
   <div class="card">

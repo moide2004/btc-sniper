@@ -268,6 +268,20 @@ def api_detail(tf):
                     "served_at": utc_now_iso(), "timeframe": tf, "table": table})
 
 
+@app.route("/api/bilan")
+@login_required
+def api_bilan():
+    # Suivi de période P4 + métriques du futur go/no-go P5 (§8).
+    import json
+    with _read_store() as st:
+        raw = st.get_kv("bilan_latest")
+        funding = st.get_kv("funding_latest")
+    out = json.loads(raw) if raw else {"note": "Bilan pas encore calculé."}
+    out["funding"] = json.loads(funding) if funding else {"integre": False}
+    out["served_at"] = utc_now_iso()
+    return jsonify(out)
+
+
 @app.route("/api/alarme/ack", methods=["POST"])
 @login_required
 def api_ack_alarm():

@@ -105,9 +105,10 @@ def test_double_barrier():
         price = c
     df = klines(rows)
     a = atr(df)
-    k, n = double_barrier_counts(df, a, rr=1.0, direction="long")
+    k, n, dur = double_barrier_counts(df, a, rr=1.0, direction="long")
     check("long presque 100 % gagnant", n > 0 and k / n > 0.95, f"{k}/{n}")
-    ks, ns = double_barrier_counts(df, a, rr=1.0, direction="short")
+    check("durée médiane mesurée (funding §5.14)", dur == dur and dur >= 1, f"{dur} bougies")
+    ks, ns, _ = double_barrier_counts(df, a, rr=1.0, direction="short")
     check("short presque 0 % gagnant", ns > 0 and ks / ns < 0.05, f"{ks}/{ns}")
 
 
@@ -176,6 +177,25 @@ def test_matrix_end_to_end():
     daily_ref = daily_sma200_ref(load_ohlcv("1D"))
     matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker)
     check("11 timeframes calculées", len(matrix) == 11, f"{len(matrix)}")
+
+    # [7] Funding directionnel (§5.14) : +F short / −F long si taux positif.
+    matrix_f = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker,
+                              funding_annualized=0.10)  # +10 %/an
+    s = next((tf for tf in matrix_f if not tf.get("insuffisant")
+              and tf["long"]["barrieres"] and tf["long"]["barrieres"][0]["n"] > 0), None)
+    check("[7] case avec funding calculée", s is not None)
+    if s:
+        bl = s["long"]["barrieres"][0]
+        bs = s["short"]["barrieres"][0]
+        check("[7] funding_r long négatif (payé)", bl["funding_r"] < 0,
+              f"{bl['funding_r']:.5f}")
+        check("[7] funding_r short positif (reçu)", bs["funding_r"] > 0,
+              f"{bs['funding_r']:.5f}")
+        check("[7] badge funding intégré", s["long"]["funding_integre"] is True)
+        sans = next(tf for tf in matrix if tf["timeframe"] == s["timeframe"])
+        check("[7] sans taux → F=0 + badge non intégré",
+              sans["long"]["barrieres"][0]["funding_r"] == 0.0
+              and sans["long"]["funding_integre"] is False)
     have_dirs = all(("long" in tf and "short" in tf) or tf.get("insuffisant") for tf in matrix)
     check("chaque case a long + short", have_dirs)
     # vérifie qu'une case type porte n, intervalle, EV+coûts

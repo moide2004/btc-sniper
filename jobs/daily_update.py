@@ -28,7 +28,7 @@ import json  # noqa: E402
 
 from core.config import CONFIG  # noqa: E402
 from core.data_source import (  # noqa: E402
-    DataSource, count_duplicates, find_gaps, load_ohlcv,
+    DataSource, count_duplicates, fetch_funding_annualized_7d, find_gaps, load_ohlcv,
     resample_1m, resample_from_1d, save_ohlcv_atomic, TF_MS,
 )
 from core.logging_setup import get_logger  # noqa: E402
@@ -74,7 +74,18 @@ def compute_and_store_matrix(store: Store) -> int:
     neutre (§5.7). Retourne le nombre de cases candidates (Vue 1)."""
     df_1d = load_ohlcv("1D")
     daily_ref = daily_sma200_ref(df_1d)
-    matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker)
+
+    # Funding perpétuel (§5.14) : moyen 7 j annualisé ; None → F=0 + badge.
+    funding = fetch_funding_annualized_7d()
+    store.set_kv("funding_latest", json.dumps({
+        "generated_at": utc_now_iso(), "annualized": funding,
+        "integre": funding is not None}))
+    if funding is None:
+        log.warning("Funding indisponible → F=0 + badge « funding non intégré »")
+    else:
+        log.info(f"Funding 7j annualisé : {funding:+.4%}")
+
+    matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker, funding)
 
     # Walk-forward (§5.12) : train = historique − 12 mois, test = 12 mois exclus.
     try:
@@ -89,7 +100,7 @@ def compute_and_store_matrix(store: Store) -> int:
         log.error(f"Walk-forward échoué : {e!r}")
 
     # Tables complètes (tous états × directions) : Vue 2 + décisions du worker.
-    tables = compute_all_tables(load_ohlcv, daily_ref, CONFIG.fee_taker)
+    tables = compute_all_tables(load_ohlcv, daily_ref, CONFIG.fee_taker, funding)
     # Badge walk-forward reporté sur chaque case des tables complètes.
     badge_by_case = {(c["timeframe"], c["etat"], c["direction"]): c["badge"]
                      for c in wf.get("cases", [])}
@@ -139,6 +150,62 @@ def compute_and_store_matrix(store: Store) -> int:
     log.info(f"Matrice calculée : {len(matrix)} timeframes, {candidates} candidate(s) ; "
              f"synthèse P(hausse)={synth.get('p_up')}")
     return candidates
+
+
+def compute_bilan(store: Store) -> None:
+    """Suivi de la période P4 et préparation du bilan P5 (§8).
+
+    P4 se termine à « 60 jours OU 100 trades papier » (premier atteint), SANS
+    raccourci (§9). Ce bilan est donc étiqueté « période en cours » tant que
+    l'échéance n'est pas atteinte ; il expose les métriques du go/no-go
+    (t-stat, rétention walk-forward, DD Monte Carlo, Brier) sans conclure —
+    la décision finale reste humaine (P5)."""
+    # Début de période : premier passage du bilan (persistant).
+    debut = store.get_kv("p4_debut_utc")
+    if not debut:
+        debut = utc_now_iso()
+        store.set_kv("p4_debut_utc", debut)
+    jours = max(0, (datetime.now(timezone.utc)
+                    - datetime.fromisoformat(debut)).days)
+
+    trades = store.conn.execute("SELECT COUNT(*) AS c FROM journal").fetchone()["c"]
+    verdicts = json.loads(store.get_kv("verdicts_latest") or "{}")
+    wf = json.loads(store.get_kv("walkforward_latest") or "{}")
+
+    par_etage = {}
+    for stage in ("1h", "4h", "1D"):
+        v = verdicts.get(stage) or {}
+        badges = [c["badge"] for c in wf.get("cases", [])
+                  if c["timeframe"] == stage]
+        par_etage[stage] = {
+            "n_trades": v.get("n", 0),
+            "t_stat": v.get("t_stat"),
+            "ev_realisee": v.get("ev_realisee"),
+            "dd_mc_p95": v.get("mc_dd_p95"),
+            "brier": v.get("brier"),
+            "retention": {b: badges.count(b)
+                          for b in ("sain", "fragile", "overfit", "n/a")},
+        }
+
+    terminee = jours >= 60 or trades >= 100
+    store.set_kv("bilan_latest", json.dumps({
+        "generated_at": utc_now_iso(),
+        "periode": {"debut_utc": debut, "jours": jours, "jours_cible": 60,
+                    "trades": trades, "trades_cible": 100,
+                    "terminee": terminee},
+        "par_etage": par_etage,
+        "global": verdicts.get("global") or {},
+        "note": ("Période P4 TERMINÉE — bilan P5 à instruire (décision humaine)."
+                 if terminee else
+                 "Période P4 en cours — métriques indicatives, aucune conclusion."),
+    }))
+    log.info(f"Bilan P4 : jour {jours}/60, {trades}/100 trades"
+             + (" — PÉRIODE TERMINÉE" if terminee else ""))
+    if terminee and not store.get_kv("p4_terminee_annoncee"):
+        store.set_kv("p4_terminee_annoncee", "1")
+        store.add_event("worker", "info",
+                        "Période P4 atteinte (60 j ou 100 trades) — le bilan "
+                        "P5 peut être instruit", {"jours": jours, "trades": trades})
 
 
 def check_clock_skew(ds: DataSource, store: Store) -> float | None:
@@ -207,6 +274,12 @@ def main() -> None:
         candidates = 0
         log.error(f"Calcul de la matrice échoué : {e!r}")
         store.add_event("worker", "error", f"Calcul matrice échoué : {e}")
+
+    # Suivi de période P4 / préparation bilan P5 (§8).
+    try:
+        compute_bilan(store)
+    except Exception as e:
+        log.error(f"Bilan P4/P5 échoué : {e!r}")
 
     duration = time.time() - t0
     ru = resource.getrusage(resource.RUSAGE_SELF)

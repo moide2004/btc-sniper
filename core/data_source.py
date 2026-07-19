@@ -336,6 +336,23 @@ _SOURCE_REGISTRY = {
 }
 
 
+def fetch_funding_annualized_7d(symbol: Optional[str] = None) -> Optional[float]:
+    """Funding moyen 7 j ANNUALISÉ du perpétuel Binance (§5.14). Le funding est
+    versé toutes les 8 h → 21 échantillons sur 7 j ; annualisé = moyenne_8h ×
+    3 × 365. Retourne None si indisponible (→ F = 0 + badge côté moteur)."""
+    symbol = symbol or CONFIG.symbol
+    try:
+        r = requests.get("https://fapi.binance.com/fapi/v1/fundingRate",
+                         params={"symbol": symbol, "limit": 21}, timeout=15)
+        r.raise_for_status()
+        rates = [float(x["fundingRate"]) for x in r.json()]
+        if not rates:
+            return None
+        return (sum(rates) / len(rates)) * 3 * 365
+    except Exception:
+        return None
+
+
 # ===========================================================================
 # Orchestrateur REST avec bascule (§7.4)
 # ===========================================================================

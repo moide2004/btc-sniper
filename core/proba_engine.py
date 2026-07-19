@@ -17,6 +17,13 @@ from scipy.stats import beta as beta_dist
 
 Z95 = 1.96  # quantile normal 95 % (§5.2)
 
+# Durée d'une bougie (ms) — pour convertir la durée médiane en jours (§5.14).
+TF_MS_ENGINE = {
+    "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+    "1h": 3_600_000, "4h": 14_400_000, "12h": 43_200_000, "1D": 86_400_000,
+    "1W": 604_800_000, "2W": 1_209_600_000, "1M": 2_592_000_000,
+}
+
 
 # ===========================================================================
 # 5.2 — Incertitude
@@ -106,7 +113,7 @@ def double_barrier_counts(
     rr: float,
     direction: str,
     mask: Optional[np.ndarray] = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, float]:
     """p̂ = fréquence de (+RR×ATR touché AVANT −1×ATR), SANS chevauchement,
     mesurée DANS LES DEUX SENS (§5.1, §5.14).
 
@@ -114,6 +121,9 @@ def double_barrier_counts(
     short : gain si low atteint entry−RR·ATR avant que high atteigne entry+ATR.
     En cas d'ambiguïté (les deux barrières dans la même bougie) → issue
     défavorable (stop d'abord), choix conservateur.
+
+    Retourne (k, n, durée de détention MÉDIANE en bougies) — la durée sert au
+    funding directionnel (§5.14 : F = funding annualisé × durée médiane).
     """
     high = df["high"].to_numpy("float64")
     low = df["low"].to_numpy("float64")
@@ -121,6 +131,7 @@ def double_barrier_counts(
     a = atr_series.to_numpy("float64")
     n_bars = len(close)
     k = n = 0
+    durations: list[int] = []
     i = 0
     while i < n_bars - 1:
         if (mask is not None and not mask[i]) or np.isnan(a[i]) or a[i] <= 0:
@@ -146,10 +157,12 @@ def double_barrier_counts(
                 k += 1; n += 1; resolved = True; break
             j += 1
         if resolved:
+            durations.append(j - i)
             i = j + 1              # sans chevauchement : reprend après résolution
         else:
             break                  # plus assez d'historique pour résoudre
-    return k, n
+    med = float(np.median(durations)) if durations else float("nan")
+    return k, n, med
 
 
 # ===========================================================================
@@ -249,9 +262,10 @@ ALL_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1D", "1W", "2W",
 def _direction_block(
     df: pd.DataFrame, atr_series: pd.Series, mask: np.ndarray, direction: str,
     cost_r: float, cost_level: str, regime: str, timeframe: str,
+    funding_ctx: Optional[dict] = None,
 ) -> dict:
-    from .couts import CONFIG  # fees déjà dans le coût ; funding non intégré → F=0
-
+    """`funding_ctx` (§5.14) : {"annualized": taux signé, "price_over_atr": x}
+    ou None si le funding est indisponible → F = 0 + badge."""
     # Probabilité directionnelle à horizon fixe : MESURE D'ISSUE pure (p̂, n,
     # intervalle, posterior). Aucune EV publiée ici — une EV sans coûts
     # violerait l'invariant §9 ; les EV vivent dans les barrières (avec coûts).
@@ -259,12 +273,23 @@ def _direction_block(
     fh_m = build_measure(fh_k, fh_n, rr=1.0, cost_r=0.0).to_dict()
     fh = {k: fh_m[k] for k in ("n", "k", "p_hat", "wilson", "posterior")}
 
-    # Double barrière aux trois RR (§5.1), funding indisponible → F = 0 (§5.14).
+    # Double barrière aux trois RR (§5.1). Funding (§5.14) :
+    # F = funding moyen 7 j annualisé × durée de détention médiane, en R ;
+    # +F short si funding positif (reçu), −F long (payé) ; signes inversés si
+    # négatif — obtenu en gardant le SIGNE du taux : terme = ±taux×durée×prix/ATR.
+    bars_per_day = 86_400_000 / TF_MS_ENGINE.get(timeframe, 86_400_000)
     barriers = []
     for rr in RR_SET:
-        k, n = double_barrier_counts(df, atr_series, rr, direction, mask)
-        m = build_measure(k, n, rr=rr, cost_r=cost_r, funding_r=0.0)
-        barriers.append({"rr": rr, **m.to_dict()})
+        k, n, med_bars = double_barrier_counts(df, atr_series, rr, direction, mask)
+        if funding_ctx is not None and med_bars == med_bars:
+            dur_years = (med_bars / bars_per_day) / 365.0
+            f_r = funding_ctx["annualized"] * dur_years * funding_ctx["price_over_atr"]
+            funding_r = f_r if direction == "short" else -f_r
+        else:
+            funding_r = 0.0
+        m = build_measure(k, n, rr=rr, cost_r=cost_r, funding_r=funding_r)
+        barriers.append({"rr": rr, "duree_mediane_bougies": med_bars,
+                         "funding_r": funding_r, **m.to_dict()})
 
     # Meilleure EV nette prudente parmi les RR respectant le verdict de coûts.
     def rr_ok(rr: float) -> bool:
@@ -308,12 +333,13 @@ def _direction_block(
         "best": best,
         "candidate": candidate,
         "motifs": motifs,
-        "funding_integre": False,  # badge « funding non intégré » (§5.14)
+        "funding_integre": funding_ctx is not None,  # badge (§5.14)
     }
 
 
 def compute_timeframe(
     df: pd.DataFrame, timeframe: str, daily_ref, fee_taker: float,
+    funding_annualized: float | None = None,
 ) -> dict:
     """Calcule la case complète d'une timeframe pour son ÉTAT COURANT, dans les
     deux directions (§5). Renvoie un dict JSON-sérialisable pour la matrice."""
@@ -337,8 +363,13 @@ def compute_timeframe(
     costs = both_verdicts(realism.sigma_bougie)
     cost_level = costs["taker"]["level"]
 
-    long_b = _direction_block(df, atr_series, mask, "long", cost_r, cost_level, regime, timeframe)
-    short_b = _direction_block(df, atr_series, mask, "short", cost_r, cost_level, regime, timeframe)
+    fctx = None
+    if funding_annualized is not None and atr_last == atr_last and atr_last > 0:
+        fctx = {"annualized": funding_annualized, "price_over_atr": close_last / atr_last}
+    long_b = _direction_block(df, atr_series, mask, "long", cost_r, cost_level,
+                              regime, timeframe, fctx)
+    short_b = _direction_block(df, atr_series, mask, "short", cost_r, cost_level,
+                               regime, timeframe, fctx)
 
     return {
         "timeframe": timeframe,
@@ -353,12 +384,13 @@ def compute_timeframe(
     }
 
 
-def compute_matrix(loader, daily_ref, fee_taker: float) -> list[dict]:
+def compute_matrix(loader, daily_ref, fee_taker: float,
+                   funding_annualized: float | None = None) -> list[dict]:
     """Calcule les 11 timeframes (§4). `loader(tf)` renvoie le DataFrame OHLCV."""
     out = []
     for tf in ALL_TIMEFRAMES:
         df = loader(tf)
-        out.append(compute_timeframe(df, tf, daily_ref, fee_taker))
+        out.append(compute_timeframe(df, tf, daily_ref, fee_taker, funding_annualized))
     return out
 
 
@@ -369,6 +401,7 @@ ALL_STATES = [f"{r}/{e}" for r in ("bull", "bear")
 
 def compute_timeframe_all_states(
     df: pd.DataFrame, timeframe: str, daily_ref, fee_taker: float,
+    funding_annualized: float | None = None,
 ) -> dict:
     """Tables COMPLÈTES d'une timeframe : chaque état × chaque direction (§5,
     Vue 2). Sert aussi aux décisions du worker (l'état courant peut changer
@@ -390,6 +423,10 @@ def compute_timeframe_all_states(
     costs = both_verdicts(realism.sigma_bougie)
     cost_level = costs["taker"]["level"]
 
+    fctx = None
+    if funding_annualized is not None and atr_last == atr_last and atr_last > 0:
+        fctx = {"annualized": funding_annualized, "price_over_atr": close_last / atr_last}
+
     etats: dict[str, dict] = {}
     for state in ALL_STATES:
         mask = (labels == state)
@@ -400,9 +437,9 @@ def compute_timeframe_all_states(
         etats[state] = {
             "n_etat": n_etat,
             "long": _direction_block(df, atr_series, mask, "long", cost_r,
-                                     cost_level, regime, timeframe),
+                                     cost_level, regime, timeframe, fctx),
             "short": _direction_block(df, atr_series, mask, "short", cost_r,
-                                      cost_level, regime, timeframe),
+                                      cost_level, regime, timeframe, fctx),
         }
 
     return {
@@ -416,8 +453,10 @@ def compute_timeframe_all_states(
     }
 
 
-def compute_all_tables(loader, daily_ref, fee_taker: float) -> dict:
+def compute_all_tables(loader, daily_ref, fee_taker: float,
+                       funding_annualized: float | None = None) -> dict:
     """Tables complètes des 11 timeframes (états × directions). LOURD : réservé
     au cycle quotidien (§2.5)."""
-    return {tf: compute_timeframe_all_states(loader(tf), tf, daily_ref, fee_taker)
+    return {tf: compute_timeframe_all_states(loader(tf), tf, daily_ref, fee_taker,
+                                             funding_annualized)
             for tf in ALL_TIMEFRAMES}

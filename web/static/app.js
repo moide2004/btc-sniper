@@ -257,7 +257,35 @@ if (dcBtn) dcBtn.addEventListener("click", () => {
   document.getElementById("detail-card").style.display = "none";
 });
 
-refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix(); refreshSynthese();
+async function refreshBilan() {
+  try {
+    const d = await getJSON("/api/bilan");
+    if (!d) return;
+    document.getElementById("bilan-note").textContent = d.note || "—";
+    const p = d.periode || {};
+    document.getElementById("bilan-jours").textContent = p.jours ?? 0;
+    document.getElementById("bilan-trades").textContent = p.trades ?? 0;
+    const f = d.funding || {};
+    document.getElementById("bilan-funding").textContent =
+      f.integre ? (100 * f.annualized).toFixed(2) + " %/an" : "non intégré (F=0)";
+    const box = document.getElementById("bilan-etages");
+    const pe = d.par_etage || {};
+    if (!Object.keys(pe).length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<table class="det">
+      <tr><th>Étage</th><th>n trades</th><th>t-stat</th><th>EV réal.</th>
+      <th>DD MC p95</th><th>Brier</th><th>Walk-fwd (sain/fragile/overfit)</th></tr>` +
+      ["1h", "4h", "1D"].map(s => {
+        const e = pe[s] || {}; const r = e.retention || {};
+        return `<tr><td>${s}</td><td>${e.n_trades ?? 0}</td><td>${num(e.t_stat)}</td>
+          <td>${num(e.ev_realisee)}</td><td>${num(e.dd_mc_p95, 1)}</td>
+          <td>${num(e.brier, 3)}</td>
+          <td>${r.sain ?? 0} / ${r.fragile ?? 0} / ${r.overfit ?? 0}</td></tr>`;
+      }).join("") + "</table>";
+  } catch (e) {}
+}
+
+refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix(); refreshBilan();
+setInterval(refreshBilan, 60000); refreshSynthese();
 setInterval(refreshLivre, 5000);           // §6.3
 setInterval(() => { refreshHealth(); refreshEvents(); }, 15000);
 setInterval(() => { refreshMatrix(); refreshSynthese(); }, 15000);
