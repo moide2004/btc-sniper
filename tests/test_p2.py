@@ -138,6 +138,25 @@ def test_resample_4h():
     check("bougie 4h == agrégat exact des 240 bougies 1m", ok)
 
 
+def test_sigma_bougie():
+    print("[5b] σ_bougie = écart-type des rendements de la timeframe (§5.4)")
+    from core.proba_engine import realism_block
+    rng = np.random.default_rng(4)
+    sigma_vraie = 0.02  # 2 % par bougie, connue
+    close = 30_000 * np.exp(np.cumsum(rng.normal(0, sigma_vraie, 3000)))
+    df = klines([(i * 60_000, c, c * 1.001, c * 0.999, c, 1.0, i * 60_000 + 59_999)
+                 for i, c in enumerate(close)])
+    for tf in ("1m", "1h"):  # le résultat ne doit PAS dépendre du nom de la TF
+        r = realism_block(df, tf, 0.5)
+        check(f"σ retrouvé sans double échelle ({tf})",
+              abs(r.sigma_bougie - sigma_vraie) < 0.002, f"{r.sigma_bougie:.4f}")
+    # 1W : fenêtre 1 an = 52 bougies seulement → tolérance d'échantillonnage
+    # élargie ; l'essentiel est l'absence du facteur ×√7 (qui donnerait 0,053).
+    r = realism_block(df, "1W", 0.5)
+    check("σ 1W sans facteur ×√7", 0.01 < r.sigma_bougie < 0.03,
+          f"{r.sigma_bougie:.4f} (double échelle donnerait 0.053)")
+
+
 def test_measure_completeness():
     print("[5] Jamais un p̂ sans n/intervalle, ni une EV sans coûts")
     m = build_measure(120, 200, rr=1.5, cost_r=0.05)
@@ -224,6 +243,7 @@ def main():
     test_known_p()
     test_double_barrier()
     test_resample_4h()
+    test_sigma_bougie()
     test_measure_completeness()
     test_matrix_end_to_end()
     print(f"\nRésultat : {PASS} réussis, {FAIL} échoués")

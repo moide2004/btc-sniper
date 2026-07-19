@@ -181,23 +181,22 @@ class Realism:
 
 
 def realism_block(df: pd.DataFrame, timeframe: str, p_hat: float) -> Realism:
-    """§5.4 : σ_bougie, CVaR 99 % empirique, k_max ≈ ln(100)/ln(1/(1−p̂))."""
+    """§5.4 : σ_bougie, CVaR 99 % empirique, k_max ≈ ln(100)/ln(1/(1−p̂)).
+
+    σ_bougie est estimé DIRECTEMENT comme l'écart-type des rendements log de
+    la timeframe elle-même : c'est la quantité que la formule du §5.4 dérive
+    du σ quotidien par les facteurs √(bougies/jour) — équivalente sous iid,
+    sans passer par une série quotidienne. (Correctif du 2026-07-20 : la
+    version précédente appliquait le facteur d'échelle aux rendements DÉJÀ
+    par-bougie — double comptage qui faussait c/σ, jusqu'à ×34 sur le 1m.)"""
     close = df["close"].astype("float64")
     logret = np.log(close / close.shift(1)).dropna()
-    # σ quotidien = std des rendements log 1 an (√365) — approché sur l'historique
-    sigma_daily = float(logret.std()) if len(logret) > 2 else float("nan")
-
-    bars_per_day = {
-        "1m": 1440, "5m": 288, "15m": 96, "30m": 48, "1h": 24, "4h": 6,
-        "12h": 2, "1D": 1,
-    }
-    days_per_bar = {"1W": 7, "2W": 14, "1M": 30}
-    if timeframe in bars_per_day:
-        sigma_bougie = sigma_daily / np.sqrt(bars_per_day[timeframe])
-    elif timeframe in days_per_bar:
-        sigma_bougie = sigma_daily * np.sqrt(days_per_bar[timeframe])
-    else:
-        sigma_bougie = sigma_daily
+    # Fenêtre ~1 an de bougies quand l'historique le permet (esprit §5.4).
+    from .states import BARS_PER_YEAR
+    window = BARS_PER_YEAR.get(timeframe)
+    if window and len(logret) > window:
+        logret = logret.tail(window)
+    sigma_bougie = float(logret.std()) if len(logret) > 2 else float("nan")
 
     if len(logret) > 20:
         q = np.quantile(logret, 0.01)
