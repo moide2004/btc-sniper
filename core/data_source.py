@@ -467,14 +467,19 @@ class BinanceKlineStream:
         self._stop = False
         self._forming: Optional[dict] = None  # bougie en cours (open_time -> row)
         self._last_msg_ms = 0
+        self._last_emitted_ot = 0  # anti-doublon : jamais 2 émissions du même open_time
 
     def _finalize_if_closed(self, force: bool = False) -> None:
-        """Émet la bougie en cours si l'horloge a dépassé sa clôture."""
+        """Émet la bougie en cours si l'horloge a dépassé sa clôture. Une même
+        open_time n'est jamais émise deux fois (une mise à jour tardive après
+        l'émission ne doit pas dupliquer la bougie)."""
         if self._forming is None:
             return
         row = self._forming
         if force or _now_ms() >= row["close_time"]:
-            self.on_closed_candle(dict(row))
+            if row["open_time"] > self._last_emitted_ot:
+                self._last_emitted_ot = row["open_time"]
+                self.on_closed_candle(dict(row))
             self._forming = None
 
     def _on_message(self, _ws, message: str) -> None:

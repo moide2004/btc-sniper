@@ -1,13 +1,24 @@
-# Moteur de probabilités BTC — P1 (Données & socle)
+# Moteur de probabilités BTC
 
-Instrument de mesure probabiliste multi-timeframes pour BTC. **Phase 1 livrée :**
-socle de données (cache 1m parquet, base SQLite WAL), source de données robuste
-(websocket sortant Binance + backfill REST + bascule Kraken/Coinbase/CoinGecko),
-worker always-on idempotent avec heartbeat, tâche quotidienne (ré-échantillonnage
-+ sauvegarde + budget ressources), et mini-app web de lecture (auth + bandeau
-d'âge des données).
+Instrument de mesure et de validation probabiliste multi-timeframes pour BTC.
 
-> Aucune notification externe. Aucun ordre réel. Voir `BRIEF.md`.
+**État des phases :**
+- **P1 — Données & socle** ✅ : cache 1m parquet, SQLite WAL, websocket Binance +
+  replis REST, worker always-on idempotent, heartbeat, cycle quotidien, web app
+  de lecture (auth, polling).
+- **P2 — Moteur statistique** ✅ : probabilités conditionnelles (horizon fixe +
+  double barrière, deux sens), Wilson/Beta, EV nette (prudente), verdicts de
+  coûts, matrice 11 timeframes.
+- **P3 — Mini-app live** ✅ : synthèse bayésienne (κ=0,6, plafond 85 %),
+  référence neutre, Vue 2 (détail états × directions), cloche avec badge +
+  marquage lu.
+- **P4 — Paper trading** ✅ (code) : tickets (§5.8), livre multi-étages 1h/4h/1D
+  (§5.9), exécution limites (§5.10), exécuteur virtuel + journal + cartes de
+  verdict (§5.11), walk-forward (§5.12), surveillance CUSUM + acquittement
+  (§5.13). La période d'observation (60 j ou 100 trades) court d'elle-même.
+- **P5 — Bilan** ⏳ : à l'issue de la période P4.
+
+> Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
 
 ---
 
@@ -182,5 +193,27 @@ de continuité, de bascule et de ré-échantillonnage de façon déterministe.
 
 ```bash
 source .venv/bin/activate
-python tests/test_p1.py
+python tests/test_p1.py   # socle données (16 tests)
+python tests/test_p2.py   # moteur statistique (21 tests)
+python tests/test_p3.py   # synthèse bayésienne + cloche (11 tests)
+python tests/test_p4.py   # paper trading, livre, CUSUM, walk-forward (30 tests)
 ```
+
+---
+
+## 8. Fonctionnement P4 (paper trading automatique)
+
+À chaque clôture d'un étage de décision (1h, 4h, 1D), le worker :
+1. invalide les tickets en attente (état quitté OU 3 bougies) ;
+2. met à jour la surveillance (CUSUM, lecture toutes les 25 clôtures) —
+   un étage « en enquête » n'émet plus de tickets jusqu'à l'acquittement
+   MANUEL dans l'app (bouton « Acquitter », Vue Livre) ;
+3. si la case (étage × état courant × direction) est candidate (EV nette
+   prudente > 0, n ≥ 200, coûts favorables, non-overfit au walk-forward) et
+   que le livre l'autorise (plafond 3 %, pas de position opposée), émet un
+   ticket : entrée limite à −0,25×ATR, SL à −1×ATR, TP au meilleur RR.
+
+Les fills sont simulés sur le flux 1m réel (SL avec slippage ×1,3 long /
+×1,5 short, coûts appliqués). Chaque trade clos alimente le journal et les
+cartes de verdict (t-stat, Monte Carlo 10 000 permutations, profit factor,
+Brier), visibles dans la Vue Livre & journal.

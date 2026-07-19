@@ -98,8 +98,110 @@ async function refreshSynthese() {
   } catch (e) { /* réessai au prochain tick */ }
 }
 
+function vcRow(name, c) {
+  if (!c || !c.n) return `<tr><td>${name}</td><td colspan="9" style="text-align:left" class="muted">aucun trade</td></tr>`;
+  return `<tr><td>${name}</td><td>${c.n}</td><td>${pct(c.p_hat)} [${pct(c.wilson.low)}–${pct(c.wilson.high)}]</td>
+    <td>${num(c.ev_realisee)}</td><td>${num(c.sigma_r)}</td><td>${num(c.t_stat)}</td>
+    <td>${c.serie_perdante_max}/${num(c.serie_attendue, 1)}</td>
+    <td>${num(c.mc_dd_median, 1)} / ${num(c.mc_dd_p95, 1)}</td>
+    <td>${c.profit_factor === null ? "—" : num(c.profit_factor)}</td><td>${num(c.brier, 3)}</td></tr>`;
+}
+
 async function refreshLivre() {
-  try { await getJSON("/api/livre"); } catch (e) {}
+  try {
+    const d = await getJSON("/api/livre");
+    if (!d) return;
+    document.getElementById("livre-gen").textContent = d.generated_at || "—";
+    document.getElementById("risk-now").textContent = d.risque_ouvert_pct;
+    document.getElementById("risk-cap").textContent = d.plafond_pct;
+    document.getElementById("journal-n").textContent = d.trades_journal || 0;
+
+    const posBox = document.getElementById("livre-positions");
+    if (!d.positions_ouvertes.length) {
+      posBox.innerHTML = '<div class="muted">Aucune position ouverte.</div>';
+    } else {
+      posBox.innerHTML = '<div class="k">Positions ouvertes</div>' + d.positions_ouvertes.map(p =>
+        `<div class="pos">${p.stage} <b>${p.direction}</b> · état ${p.etat} · fill ${num(p.fill)} ·
+         SL ${num(p.sl)} · TP ${num(p.tp)} (RR ${p.rr}) · risque ${pct(p.risque_pct)}</div>`).join("");
+    }
+
+    const tkBox = document.getElementById("livre-tickets");
+    const actifs = d.tickets_actifs.map(t =>
+      `<div class="pos">🎫 ${t.stage} <b>${t.direction}</b> · limite ${num(t.limite)} ·
+       p̂ ${pct(t.p_annonce)} · EV prud. ${num(t.ev_nette_prudente)} R</div>`).join("");
+    const bloques = d.tickets_bloques.slice(0, 8).map(t =>
+      `<div class="pos" style="opacity:.6">⛔ ${t.stage} ${t.direction} —
+       ${t.motif_blocage || t.motif_expiration || t.status}</div>`).join("");
+    tkBox.innerHTML = (actifs || bloques)
+      ? `<div class="k">Tickets</div>${actifs}${bloques}` : "";
+
+    const v = d.verdicts || {};
+    const vBox = document.getElementById("livre-verdicts");
+    if (v.global && v.global.n) {
+      vBox.innerHTML = `<div class="k">Cartes de verdict</div>
+        <table class="det"><tr><th>Étage</th><th>n</th><th>p̂ [Wilson]</th><th>EV réal.</th>
+        <th>σ_R</th><th>t-stat</th><th>série max/att.</th><th>DD MC méd/p95</th>
+        <th>PF</th><th>Brier</th></tr>
+        ${vcRow("global", v.global)}${vcRow("1h", v["1h"])}${vcRow("4h", v["4h"])}${vcRow("1D", v["1D"])}
+        </table>`;
+    } else { vBox.innerHTML = ""; }
+
+    const mBox = document.getElementById("livre-monitors");
+    const mons = d.surveillance || {};
+    mBox.innerHTML = '<div class="k">Surveillance (CUSUM)</div>' +
+      ["1h", "4h", "1D"].map(s => {
+        const m = mons[s];
+        if (!m) return `<div class="pos">${s} : <span class="muted">pas encore de suivi</span></div>`;
+        const alarm = m.en_enquete
+          ? ` <span class="pill no">EN ENQUÊTE — ${m.motif || ""}</span>
+              <button class="btnlu" onclick="ackAlarm('${s}')">Acquitter</button>`
+          : ' <span class="pill ok">ok</span>';
+        return `<div class="pos">${s} : CUSUM ${num(m.cusum)} / h ${m.h ? num(m.h) : "—"} ·
+                clôtures ${m.closes}${alarm}</div>`;
+      }).join("");
+  } catch (e) {}
+}
+
+async function ackAlarm(stage) {
+  try {
+    await fetch("/api/alarme/ack", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage })
+    });
+    refreshLivre();
+  } catch (e) {}
+}
+
+async function showDetail(tf) {
+  try {
+    const d = await getJSON("/api/detail/" + tf);
+    if (!d || !d.table) return;
+    document.getElementById("detail-card").style.display = "block";
+    document.getElementById("detail-tf").textContent = tf;
+    const t = d.table;
+    const rows = [];
+    for (const [etat, blk] of Object.entries(t.etats || {})) {
+      for (const dir of ["long", "short"]) {
+        const b = blk[dir]; const fh = b.horizon_fixe || {}; const best = b.best;
+        rows.push(`<tr><td>${etat} · ${dir}</td><td>${blk.n_etat}</td>
+          <td>${pct(fh.p_hat)} [${pct((fh.wilson||{}).low)}–${pct((fh.wilson||{}).high)}]</td>
+          <td>${fh.n ?? 0}</td>
+          <td>${best ? "RR " + best.rr + " → " + num(best.ev_nette_prudente) + " R" : "—"}</td>
+          <td>${b.walkforward || "n/a"}</td>
+          <td>${b.candidate ? '<span class="pill ok">candidate</span>'
+                            : (b.motifs || []).join(", ") || "—"}</td></tr>`);
+      }
+    }
+    const r = t.realisme || {};
+    document.getElementById("detail-body").innerHTML =
+      `<div class="muted" style="margin-bottom:6px">σ_bougie ${pct(r.sigma_bougie)} ·
+       CVaR99 ${pct(r.cvar99)} · k_max ${num(r.k_max, 1)} ·
+       coûts (taker) : ${((t.couts||{}).taker||{}).verdict || "—"}</div>
+      <table class="det"><tr><th>État · sens</th><th>n état</th><th>p̂ horizon [Wilson]</th>
+      <th>n</th><th>Meilleure EV prudente</th><th>walk-fwd</th><th>Statut</th></tr>
+      ${rows.join("")}</table>`;
+  } catch (e) {}
 }
 
 function pct(x) { return (x === null || x === undefined || isNaN(x)) ? "—" : (100 * x).toFixed(1) + " %"; }
@@ -133,7 +235,7 @@ async function refreshMatrix() {
       const c = tf.couts && tf.couts.taker ? tf.couts.taker : {};
       const cand = tf.candidate ? "cand" : "";
       const grey = (!tf.long.candidate && !tf.short.candidate) ? "grey" : "";
-      return `<div class="tf ${cand} ${grey}">
+      return `<div class="tf ${cand} ${grey}" onclick="showDetail('${tf.timeframe}')">
         <h3><span>${tf.timeframe}</span><span class="st">${tf.etat} · n=${tf.n_etat}</span></h3>
         ${dirRow("Long", tf.long)}
         ${dirRow("Short", tf.short)}
@@ -145,6 +247,10 @@ async function refreshMatrix() {
 
 const mrBtn = document.getElementById("mark-read");
 if (mrBtn) mrBtn.addEventListener("click", markRead);
+const dcBtn = document.getElementById("detail-close");
+if (dcBtn) dcBtn.addEventListener("click", () => {
+  document.getElementById("detail-card").style.display = "none";
+});
 
 refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix(); refreshSynthese();
 setInterval(refreshLivre, 5000);           // §6.3

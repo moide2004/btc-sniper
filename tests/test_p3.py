@@ -73,11 +73,14 @@ def test_bell_ack():
     st.add_event("candidate", "info", "case devenue candidate — test")
     st.add_event("data_incident", "warning", "bascule — test")
     check("2 non-lus au départ", st.unread_count() == 2)
-    n = st.mark_events_read()
-    check("2 marqués lus", n == 2)
+    # Flux §7.1 : la web app DÉPOSE l'action ; le worker la CONSOMME.
+    max_id = st.conn.execute("SELECT MAX(id) AS m FROM events").fetchone()["m"]
+    st.add_web_action("mark_read", str(max_id))
+    check("encore non-lus avant passage worker", st.unread_count() == 2)
+    from core.monitoring import process_web_actions
+    n = process_web_actions(st)
+    check("action consommée par le worker", n == 1)
     check("0 non-lu après", st.unread_count() == 0)
-    wa = st.conn.execute("SELECT action FROM web_actions ORDER BY id DESC LIMIT 1").fetchone()
-    check("action journalisée dans web_actions", wa is not None and wa["action"] == "mark_read")
     st.close()
 
 

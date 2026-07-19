@@ -45,6 +45,12 @@
     .syn .big{font-size:26px;font-weight:600}
     .contrib{font-size:12px;color:var(--dim);margin-top:8px}
     .contrib span{display:inline-block;margin-right:10px}
+    table.det{border-collapse:collapse;font-size:12px;min-width:640px}
+    table.det th,table.det td{border:1px solid var(--line);padding:5px 8px;text-align:right}
+    table.det th{color:var(--dim);font-weight:500}
+    table.det td:first-child,table.det th:first-child{text-align:left}
+    .pos{font-size:12.5px;padding:5px 0;border-bottom:1px solid #20242e}
+    .tf{cursor:pointer}
   </style>
 </head>
 <body>
@@ -82,9 +88,35 @@
       <span id="mtx-gen" class="muted">—</span></div>
     <div id="matrix" class="mtx"><div class="muted">chargement…</div></div>
     <p class="muted" style="margin-top:10px">Chaque case : état courant, p̂ [Wilson]
-      des deux sens, n, EV nette prudente, verdict de coûts. Les candidates sont
-      surlignées ; les cases refusées sont grisées avec leur motif. Funding non
-      intégré (F=0). Recalcul 1×/jour.</p>
+      des deux sens, n, EV nette prudente, verdict de coûts, badge walk-forward.
+      Les candidates sont surlignées ; les cases refusées sont grisées avec leur
+      motif. Funding non intégré (F=0). Recalcul 1×/jour.
+      <b>Cliquer une carte</b> ouvre le détail de l'échelle (tous les états).</p>
+  </div>
+
+  <div class="card" id="detail-card" style="display:none">
+    <div class="k" style="margin-bottom:8px;display:flex;justify-content:space-between">
+      <span>Détail — <b id="detail-tf">—</b> · tous les états × directions</span>
+      <button class="btnlu" id="detail-close">Fermer</button>
+    </div>
+    <div id="detail-body" style="overflow-x:auto"><div class="muted">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="k" style="margin-bottom:8px">Livre &amp; journal — paper trading ·
+      <span id="livre-gen" class="muted">—</span></div>
+    <div class="syn" style="margin-bottom:8px">
+      <div><div class="k">Risque ouvert</div><div class="big"><span id="risk-now">0</span> %
+        <span class="muted">/ <span id="risk-cap">3</span> %</span></div></div>
+      <div><div class="k">Trades au journal</div><div class="big" id="journal-n">0</div></div>
+    </div>
+    <div id="livre-positions"><div class="muted">Aucune position ouverte.</div></div>
+    <div id="livre-tickets" style="margin-top:8px"></div>
+    <div id="livre-verdicts" style="margin-top:10px;overflow-x:auto"></div>
+    <div id="livre-monitors" style="margin-top:10px"></div>
+    <p class="muted" style="margin-top:8px">Exécution virtuelle uniquement — aucun
+      ordre réel, jamais. Les tickets naissent aux clôtures 1h / 4h / 1D si une
+      case est candidate ; fills simulés sur le flux 1m.</p>
   </div>
 
   <div class="card">

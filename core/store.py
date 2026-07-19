@@ -128,9 +128,13 @@ class Store:
 
     def _apply_pragmas(self) -> None:
         cur = self.conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL;")
-        cur.execute("PRAGMA foreign_keys=ON;")
-        if not self.read_only:
+        if self.read_only:
+            # Pas de changement de journal_mode sur une connexion ro (la base
+            # du worker est déjà en WAL) ; juste le timeout de lecture.
+            cur.execute("PRAGMA busy_timeout=30000;")
+        else:
+            cur.execute("PRAGMA journal_mode=WAL;")
+            cur.execute("PRAGMA foreign_keys=ON;")
             # Durabilité correcte sans le coût d'un fsync par écriture.
             cur.execute("PRAGMA synchronous=NORMAL;")
             cur.execute("PRAGMA busy_timeout=30000;")
@@ -199,18 +203,24 @@ class Store:
         row = self.conn.execute("SELECT COUNT(*) AS c FROM events WHERE read = 0").fetchone()
         return int(row["c"])
 
+    def add_web_action(self, action: str, target: str) -> int:
+        """Dépose une action web (acquittement d'alarme) dans la table dédiée
+        (§7.1). Le worker la consommera — la web app n'écrit rien d'autre."""
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO web_actions (ts_utc, action, target) VALUES (?,?,?)",
+                (utc_now_iso(), action, target))
+            return int(cur.lastrowid)
+
     def mark_events_read(self, up_to_id: Optional[int] = None) -> int:
-        """Marque des événements comme lus. ÉCRITURE autorisée depuis la web app
-        (§7.1) : journalisée dans web_actions."""
+        """Applique le marquage lu. Appelé par le WORKER (via web_actions,
+        §7.1) — la web app ne fait que déposer l'action dans la table dédiée."""
         with self.conn:
             if up_to_id is None:
                 cur = self.conn.execute("UPDATE events SET read = 1 WHERE read = 0")
             else:
                 cur = self.conn.execute(
                     "UPDATE events SET read = 1 WHERE read = 0 AND id <= ?", (up_to_id,))
-            self.conn.execute(
-                "INSERT INTO web_actions (ts_utc, action, target) VALUES (?,?,?)",
-                (utc_now_iso(), "mark_read", str(up_to_id) if up_to_id else "all"))
             return cur.rowcount
 
     def prune_events(self, days: int = 90) -> int:

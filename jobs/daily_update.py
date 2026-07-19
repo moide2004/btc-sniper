@@ -32,9 +32,10 @@ from core.data_source import (  # noqa: E402
     resample_1m, resample_from_1d, save_ohlcv_atomic, TF_MS,
 )
 from core.logging_setup import get_logger  # noqa: E402
-from core.proba_engine import compute_matrix  # noqa: E402
+from core.proba_engine import compute_all_tables, compute_matrix  # noqa: E402
 from core.stack import StackEntry, lognormal_reference, stack  # noqa: E402
 from core.states import daily_sma200_ref  # noqa: E402
+from core.walkforward import disqualified_set, walkforward  # noqa: E402
 from core.store import Store, utc_now_iso  # noqa: E402
 
 log = get_logger("daily")
@@ -68,12 +69,54 @@ def rebuild_timeframes() -> dict[str, int]:
 
 
 def compute_and_store_matrix(store: Store) -> int:
-    """Calcule la matrice des 11 timeframes (§5) + la synthèse bayésienne (§5.6)
-    + la référence neutre (§5.7), et les stocke (snapshots lus par la web app).
-    Retourne le nombre de cases candidates."""
+    """Calcule la matrice des 11 timeframes (§5) + tables complètes (Vue 2 et
+    décisions) + walk-forward (§5.12) + synthèse bayésienne (§5.6) + référence
+    neutre (§5.7). Retourne le nombre de cases candidates (Vue 1)."""
     df_1d = load_ohlcv("1D")
     daily_ref = daily_sma200_ref(df_1d)
     matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker)
+
+    # Walk-forward (§5.12) : train = historique − 12 mois, test = 12 mois exclus.
+    try:
+        wf = walkforward(load_ohlcv, daily_sma200_ref, CONFIG.fee_taker)
+        disq = disqualified_set(wf)
+        store.set_kv("walkforward_latest", json.dumps(
+            {"generated_at": utc_now_iso(), **wf}))
+        log.info(f"Walk-forward : {len(wf['cases'])} cases, "
+                 f"{len(disq)} disqualifiée(s) (overfit)")
+    except Exception as e:
+        wf, disq = {"cases": []}, set()
+        log.error(f"Walk-forward échoué : {e!r}")
+
+    # Tables complètes (tous états × directions) : Vue 2 + décisions du worker.
+    tables = compute_all_tables(load_ohlcv, daily_ref, CONFIG.fee_taker)
+    # Badge walk-forward reporté sur chaque case des tables complètes.
+    badge_by_case = {(c["timeframe"], c["etat"], c["direction"]): c["badge"]
+                     for c in wf.get("cases", [])}
+    for tf_name, tf_table in tables.items():
+        for state, blk in tf_table.get("etats", {}).items():
+            for direction in ("long", "short"):
+                badge = badge_by_case.get((tf_name, state, direction), "n/a")
+                blk[direction]["walkforward"] = badge
+                if badge == "overfit" and blk[direction].get("candidate"):
+                    blk[direction]["candidate"] = False
+                    blk[direction]["motifs"].append("overfit ? (walk-forward)")
+    store.set_kv("tables_latest", json.dumps({"generated_at": utc_now_iso(),
+                                              "timeframes": tables}))
+
+    # Vue 1 : reporter badge + disqualification sur la matrice servie.
+    for tf_entry in matrix:
+        if tf_entry.get("insuffisant"):
+            continue
+        for direction in ("long", "short"):
+            key = (tf_entry["timeframe"], tf_entry["etat"], direction)
+            badge = badge_by_case.get(key, "n/a")
+            tf_entry[direction]["walkforward"] = badge
+            if badge == "overfit" and tf_entry[direction].get("candidate"):
+                tf_entry[direction]["candidate"] = False
+                tf_entry[direction]["motifs"].append("overfit ? (walk-forward)")
+        tf_entry["candidate"] = bool(tf_entry["long"]["candidate"]
+                                     or tf_entry["short"]["candidate"])
     store.set_kv("matrix_latest", json.dumps({"generated_at": utc_now_iso(),
                                               "timeframes": matrix}))
 

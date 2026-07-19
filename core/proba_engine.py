@@ -252,9 +252,12 @@ def _direction_block(
 ) -> dict:
     from .couts import CONFIG  # fees déjà dans le coût ; funding non intégré → F=0
 
-    # Probabilité directionnelle à horizon fixe (mesure d'issue, sans RR).
+    # Probabilité directionnelle à horizon fixe : MESURE D'ISSUE pure (p̂, n,
+    # intervalle, posterior). Aucune EV publiée ici — une EV sans coûts
+    # violerait l'invariant §9 ; les EV vivent dans les barrières (avec coûts).
     fh_k, fh_n = fixed_horizon_counts(df["close"], HORIZON_DEFAULT, mask, direction)
-    fh = build_measure(fh_k, fh_n, rr=1.0, cost_r=0.0)  # horizon fixe : pas de coût RR
+    fh_m = build_measure(fh_k, fh_n, rr=1.0, cost_r=0.0).to_dict()
+    fh = {k: fh_m[k] for k in ("n", "k", "p_hat", "wilson", "posterior")}
 
     # Double barrière aux trois RR (§5.1), funding indisponible → F = 0 (§5.14).
     barriers = []
@@ -300,7 +303,7 @@ def _direction_block(
 
     return {
         "direction": direction,
-        "horizon_fixe": {"H": HORIZON_DEFAULT, **fh.to_dict()},
+        "horizon_fixe": {"H": HORIZON_DEFAULT, **fh},
         "barrieres": barriers,
         "best": best,
         "candidate": candidate,
@@ -357,3 +360,64 @@ def compute_matrix(loader, daily_ref, fee_taker: float) -> list[dict]:
         df = loader(tf)
         out.append(compute_timeframe(df, tf, daily_ref, fee_taker))
     return out
+
+
+# Les 6 états possibles (§4 : Régime × Extension).
+ALL_STATES = [f"{r}/{e}" for r in ("bull", "bear")
+              for e in ("survendu", "neutre", "surachete")]
+
+
+def compute_timeframe_all_states(
+    df: pd.DataFrame, timeframe: str, daily_ref, fee_taker: float,
+) -> dict:
+    """Tables COMPLÈTES d'une timeframe : chaque état × chaque direction (§5,
+    Vue 2). Sert aussi aux décisions du worker (l'état courant peut changer
+    entre deux recalculs quotidiens). Renvoie un dict JSON-sérialisable."""
+    from .states import state_labels
+    from .couts import both_verdicts, cost_in_r
+
+    if df is None or len(df) < HORIZON_DEFAULT + 5:
+        return {"timeframe": timeframe, "insuffisant": True, "etats": {}}
+
+    atr_series = atr(df)
+    labels, current = state_labels(df, timeframe, daily_ref)
+
+    close_last = float(df["close"].iloc[-1])
+    atr_last = float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else float("nan")
+    cost_r = cost_in_r(fee_taker, close_last, atr_last)
+
+    realism = realism_block(df, timeframe, 0.5)
+    costs = both_verdicts(realism.sigma_bougie)
+    cost_level = costs["taker"]["level"]
+
+    etats: dict[str, dict] = {}
+    for state in ALL_STATES:
+        mask = (labels == state)
+        n_etat = int(mask.sum())
+        if n_etat == 0:
+            continue
+        regime = state.split("/")[0]
+        etats[state] = {
+            "n_etat": n_etat,
+            "long": _direction_block(df, atr_series, mask, "long", cost_r,
+                                     cost_level, regime, timeframe),
+            "short": _direction_block(df, atr_series, mask, "short", cost_r,
+                                      cost_level, regime, timeframe),
+        }
+
+    return {
+        "timeframe": timeframe,
+        "etat_courant": current,
+        "close": close_last, "atr": atr_last, "cost_r": cost_r,
+        "realisme": {"sigma_bougie": realism.sigma_bougie, "cvar99": realism.cvar99,
+                     "k_max": realism.k_max},
+        "couts": costs,
+        "etats": etats,
+    }
+
+
+def compute_all_tables(loader, daily_ref, fee_taker: float) -> dict:
+    """Tables complètes des 11 timeframes (états × directions). LOURD : réservé
+    au cycle quotidien (§2.5)."""
+    return {tf: compute_timeframe_all_states(loader(tf), tf, daily_ref, fee_taker)
+            for tf in ALL_TIMEFRAMES}
