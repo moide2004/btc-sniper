@@ -1,11 +1,18 @@
 """Empilement bayésien (§5.6) et référence neutre (§5.7).
 
 ln O = κ·Σ ln LR_i, κ = 0,6, plafond 85 % ; contributions par timeframe
-affichées. Les LR_i sont estimés à partir de la probabilité directionnelle
-conditionnelle (horizon fixe) de chaque échelle.
+affichées.
 
-Rien n'est modifié sans accord (§9) : κ, le plafond et la forme du produit de
-vraisemblances sont ceux du cahier des charges.
+Estimation des LR_i (« estimés sur l'historique », §5.6) : chaque échelle vote
+avec la MOYENNE DU POSTERIOR Beta(5+k, 5+n−k) — le même amortisseur que §5.2 —
+et non le p̂ brut. Mécanisme : un p̂ brut de 100 % à n=3 donnerait des cotes
+quasi infinies et écraserait la synthèse ; le posterior le ramène à ~62 % et
+laisse les échelles à grand n voter à leur juste poids (n=3 → prior dominant ;
+n=50 000 → p̂ quasi inchangé).
+Décision utilisateur du 2026-07-20 (§9) : « modifier P(hausse) de manière
+cohérente avec la réalité statistique du marché ».
+
+κ, le plafond 85 % et la forme du produit restent ceux du cahier des charges.
 """
 from __future__ import annotations
 
@@ -15,6 +22,8 @@ from dataclasses import dataclass
 KAPPA = 0.6
 CAP = 0.85          # plafond (et plancher symétrique 1−CAP)
 EPS = 1e-6
+PRIOR_A = 5.0       # prior Beta(5,5) — identique à §5.2 (proba_engine)
+PRIOR_B = 5.0
 
 
 @dataclass
@@ -22,6 +31,12 @@ class StackEntry:
     timeframe: str
     p_up: float
     n: int
+
+
+def _posterior_mean(p_hat: float, n: int) -> float:
+    """Moyenne du posterior Beta(5+k, 5+n−k) avec k = p̂·n (§5.2)."""
+    k = p_hat * n
+    return (PRIOR_A + k) / (PRIOR_A + PRIOR_B + n)
 
 
 def stack(entries: list[StackEntry], kappa: float = KAPPA, cap: float = CAP) -> dict:
@@ -33,14 +48,15 @@ def stack(entries: list[StackEntry], kappa: float = KAPPA, cap: float = CAP) -> 
     for e in entries:
         if e.n <= 0 or e.p_up != e.p_up:  # n nul ou NaN
             continue
-        p = min(max(e.p_up, EPS), 1 - EPS)
+        p_vote = _posterior_mean(e.p_up, e.n)
+        p = min(max(p_vote, EPS), 1 - EPS)
         lr = p / (1 - p)
         contrib = kappa * math.log(lr)
         ln_o += contrib
         used += 1
         contributions.append({
-            "timeframe": e.timeframe, "p_up": e.p_up, "n": e.n,
-            "lr": lr, "contribution": contrib,
+            "timeframe": e.timeframe, "p_up": e.p_up, "p_vote": p_vote,
+            "n": e.n, "lr": lr, "contribution": contrib,
         })
     if used == 0:
         return {"p_up": float("nan"), "ln_odds": float("nan"),

@@ -90,9 +90,14 @@ async function refreshSynthese() {
     const s = d.synthese;
     if (!s || isNaN(s.p_up)) { box.innerHTML = `<div class="muted">${d.note || "Pas encore de synthèse."}</div>`; return; }
     const ref = d.reference_neutre || {};
-    const contribs = (s.contributions || []).slice(0, 6).map(c =>
-      `<span>${c.timeframe}: ${(c.contribution >= 0 ? "+" : "")}${c.contribution.toFixed(2)} (p̂ ${pct(c.p_up)})</span>`
-    ).join("");
+    const contribs = (s.contributions || []).slice(0, 6).map(c => {
+      // p_vote = probabilité AMORTIE par l'échantillon (celle qui vote, §5.6) ;
+      // le p̂ brut est rappelé quand l'amortisseur l'a nettement corrigé.
+      const pv = c.p_vote ?? c.p_up;
+      const brut = (c.p_vote !== undefined && Math.abs(c.p_vote - c.p_up) > 0.02)
+        ? ` <span class="lab">(p̂ brut ${pct(c.p_up)}, n=${c.n})</span>` : "";
+      return `<span>${c.timeframe}: ${(c.contribution >= 0 ? "+" : "")}${c.contribution.toFixed(2)} (p ${pct(pv)})${brut}</span>`;
+    }).join("");
     box.innerHTML = `<div class="syn">
         <div><div class="k">P(hausse) globale</div><div class="big">${pct(s.p_up)}</div>
           ${s.capped ? '<span class="muted">(plafonné 85 %)</span>' : ''}</div>

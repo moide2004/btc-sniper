@@ -67,6 +67,24 @@ def test_stack_neutral():
     check("synthèse ≈ 0.5", abs(s["p_up"] - 0.5) < 1e-9, f"{s['p_up']:.4f}")
 
 
+def test_stack_small_n_damped():
+    print("[3b] Amortisseur bayésien (§9, décision 2026-07-20) — le n=3 ne crie plus")
+    # Le cas réel observé : 1M à p̂=100 % avec n=3, face à des échelles neutres.
+    entries = [StackEntry("1m", 0.50, 50_000), StackEntry("1h", 0.502, 3_000),
+               StackEntry("1D", 0.51, 148), StackEntry("1M", 1.00, 3)]
+    s = stack(entries)
+    m = next(c for c in s["contributions"] if c["timeframe"] == "1M")
+    check("le 1M vote ~0.615 (posterior), pas 100 %",
+          abs(m["p_vote"] - (5 + 3) / (10 + 3)) < 1e-9, f"{m['p_vote']:.3f}")
+    check("sa contribution est modeste (|c| < 0.5)",
+          abs(m["contribution"]) < 0.5, f"{m['contribution']:+.2f}")
+    check("la synthèse n'est PLUS clouée au plafond", s["p_up"] < 0.84,
+          f"{s['p_up']:.3f}")
+    big = next(c for c in s["contributions"] if c["timeframe"] == "1m")
+    check("les gros n votent quasi inchangés",
+          abs(big["p_vote"] - 0.50) < 0.001, f"{big['p_vote']:.4f}")
+
+
 def test_bell_ack():
     print("[4] Cloche — marquage lu (écriture web autorisée §7.1)")
     st = Store()
@@ -89,6 +107,7 @@ def main():
     test_stack_bullish()
     test_stack_cap()
     test_stack_neutral()
+    test_stack_small_n_damped()
     test_bell_ack()
     print(f"\nRésultat : {PASS} réussis, {FAIL} échoués")
     return 1 if FAIL else 0
