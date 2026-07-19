@@ -218,7 +218,11 @@ class PaperTrader:
                 continue
             p["bougies_attente"] = p.get("bougies_attente", 0) + 1
             reason = None
-            if p["etat"] != current_state:
+            # v1.5 : un ticket de sous-case porte « état [vol zone] » ; l'inva-
+            # lidation « état quitté » se juge sur l'état PARENT (la zone de
+            # vol, percentile 1 an, ne bouge qu'à l'échelle du jour).
+            etat_parent = p["etat"].split(" [")[0]
+            if etat_parent != current_state:
                 reason = "état quitté"
             elif p["bougies_attente"] >= p["invalidation"]["bougies_max"]:
                 reason = "3 bougies sans exécution"

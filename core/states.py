@@ -67,6 +67,64 @@ class CurrentState:
 # celles dont le régime vient du momentum 26 périodes (≥ 1W).
 MOMENTUM_TF = {"1W", "2W", "1M"}
 
+# Bougies par an et par jour, pour la fenêtre de percentile v1.5 (§4).
+BARS_PER_YEAR = {
+    "1m": 525_600, "5m": 105_120, "15m": 35_040, "30m": 17_520,
+    "1h": 8_760, "4h": 2_190, "12h": 730, "1D": 365,
+    "1W": 52, "2W": 26, "1M": 12,
+}
+BARS_PER_DAY = {
+    "1m": 1_440, "5m": 288, "15m": 96, "30m": 48, "1h": 24, "4h": 6,
+    "12h": 2, "1D": 1, "1W": 1, "2W": 1, "1M": 1,
+}
+
+
+def ewma_vol(close: pd.Series, lam: float = 0.94) -> pd.Series:
+    """Vol EWMA par bougie (λ=0,94, §4 v1.5) : var_t = λ·var_{t−1} + (1−λ)·r_t²,
+    soit un ewm(alpha=1−λ) sur les rendements log au carré."""
+    r = np.log(close.astype("float64")).diff()
+    var = (r ** 2).ewm(alpha=1 - lam, adjust=False, min_periods=10).mean()
+    return np.sqrt(var)
+
+
+def vol_zone_labels(df: pd.DataFrame, timeframe: str) -> tuple[np.ndarray, str]:
+    """Zones de volatilité v1.5 (§4) : percentile 1 AN GLISSANT de la vol EWMA,
+    découpé en 3 zones (terciles) : basse / moyenne / haute.
+
+    Zéro look-ahead : la zone d'une bougie compare sa vol aux seuils issus de
+    l'ANNÉE qui la précède. Discrétisation documentée : les seuils (q33/q67)
+    sont recalculés à pas quotidien puis propagés — le percentile 1 an évolue
+    lentement, le coût reste borné (§2.5).
+    Retourne (labels par bougie, zone courante)."""
+    n = len(df)
+    out = np.full(n, "inconnu", dtype=object)
+    if n == 0:
+        return out, "inconnu"
+    vol = ewma_vol(df["close"]).to_numpy("float64")
+    window = BARS_PER_YEAR.get(timeframe, 365)
+    stride = max(1, BARS_PER_DAY.get(timeframe, 1))
+    min_hist = max(30, window // 4)  # au moins ~3 mois d'historique de vol
+
+    lo = np.full(n, np.nan)
+    hi = np.full(n, np.nan)
+    for i in range(min_hist, n + stride, stride):
+        i = min(i, n)
+        seg = vol[max(0, i - window):i]
+        seg = seg[~np.isnan(seg)]
+        if len(seg) < min_hist:
+            continue
+        q33, q67 = np.quantile(seg, [1 / 3, 2 / 3])
+        lo[i - 1:min(i - 1 + stride, n)] = q33
+        hi[i - 1:min(i - 1 + stride, n)] = q67
+        if i == n:
+            break
+
+    valid = ~np.isnan(vol) & ~np.isnan(lo)
+    out[valid & (vol <= lo)] = "basse"
+    out[valid & (vol >= hi)] = "haute"
+    out[valid & (vol > lo) & (vol < hi)] = "moyenne"
+    return out, str(out[-1])
+
 
 def daily_sma200_ref(daily_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Prépare la référence de régime ≤ 1D : (close_time, SMA200) du 1D.

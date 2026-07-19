@@ -427,6 +427,11 @@ def compute_timeframe_all_states(
     if funding_annualized is not None and atr_last == atr_last and atr_last > 0:
         fctx = {"annualized": funding_annualized, "price_over_atr": close_last / atr_last}
 
+    # Dimension volatilité v1.5 (§4) : zones du percentile 1 an de vol EWMA.
+    from .states import vol_zone_labels
+    zone_labels, zone_current = vol_zone_labels(df, timeframe)
+    VOL_ZONES = ("basse", "moyenne", "haute")
+
     etats: dict[str, dict] = {}
     for state in ALL_STATES:
         mask = (labels == state)
@@ -434,17 +439,39 @@ def compute_timeframe_all_states(
         if n_etat == 0:
             continue
         regime = state.split("/")[0]
-        etats[state] = {
+        blk = {
             "n_etat": n_etat,
             "long": _direction_block(df, atr_series, mask, "long", cost_r,
                                      cost_level, regime, timeframe, fctx),
             "short": _direction_block(df, atr_series, mask, "short", cost_r,
                                       cost_level, regime, timeframe, fctx),
         }
+        # v1.5 : ACTIVÉE case par case seulement si CHAQUE sous-case (état ×
+        # zone) garde n ≥ 200 (§4). Sinon la dimension reste inactive et la
+        # case parente fait foi.
+        sub_masks = {z: mask & (zone_labels == z) for z in VOL_ZONES}
+        sub_ns = {z: int(m.sum()) for z, m in sub_masks.items()}
+        blk["vol_active"] = all(v >= N_MIN for v in sub_ns.values())
+        if blk["vol_active"]:
+            blk["vol_zones"] = {}
+            for z in VOL_ZONES:
+                blk["vol_zones"][z] = {
+                    "n_etat": sub_ns[z],
+                    "long": _direction_block(df, atr_series, sub_masks[z], "long",
+                                             cost_r, cost_level, regime,
+                                             timeframe, fctx),
+                    "short": _direction_block(df, atr_series, sub_masks[z], "short",
+                                              cost_r, cost_level, regime,
+                                              timeframe, fctx),
+                }
+        else:
+            blk["vol_sous_cases_n"] = sub_ns  # motif d'inactivation affichable
+        etats[state] = blk
 
     return {
         "timeframe": timeframe,
         "etat_courant": current,
+        "vol_zone_courante": zone_current,
         "close": close_last, "atr": atr_last, "cost_r": cost_r,
         "realisme": {"sigma_bougie": realism.sigma_bougie, "cvar99": realism.cvar99,
                      "k_max": realism.k_max},

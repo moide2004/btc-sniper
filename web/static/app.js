@@ -186,23 +186,30 @@ async function showDetail(tf) {
     document.getElementById("detail-tf").textContent = tf;
     const t = d.table;
     const rows = [];
+    const pushRow = (label, nEtat, b) => {
+      const fh = b.horizon_fixe || {}; const best = b.best;
+      rows.push(`<tr><td>${label}</td><td>${nEtat}</td>
+        <td>${pct(fh.p_hat)} [${pct((fh.wilson||{}).low)}–${pct((fh.wilson||{}).high)}]</td>
+        <td>${fh.n ?? 0}</td>
+        <td>${best ? "RR " + best.rr + " → " + num(best.ev_nette_prudente) + " R" : "—"}</td>
+        <td>${b.walkforward || "n/a"}</td>
+        <td>${b.candidate ? '<span class="pill ok">candidate</span>'
+                          : (b.motifs || []).join(", ") || "—"}</td></tr>`);
+    };
     for (const [etat, blk] of Object.entries(t.etats || {})) {
-      for (const dir of ["long", "short"]) {
-        const b = blk[dir]; const fh = b.horizon_fixe || {}; const best = b.best;
-        rows.push(`<tr><td>${etat} · ${dir}</td><td>${blk.n_etat}</td>
-          <td>${pct(fh.p_hat)} [${pct((fh.wilson||{}).low)}–${pct((fh.wilson||{}).high)}]</td>
-          <td>${fh.n ?? 0}</td>
-          <td>${best ? "RR " + best.rr + " → " + num(best.ev_nette_prudente) + " R" : "—"}</td>
-          <td>${b.walkforward || "n/a"}</td>
-          <td>${b.candidate ? '<span class="pill ok">candidate</span>'
-                            : (b.motifs || []).join(", ") || "—"}</td></tr>`);
+      for (const dir of ["long", "short"]) pushRow(`${etat} · ${dir}`, blk.n_etat, blk[dir]);
+      // Dimension volatilité v1.5 (§4) — affichée quand active (n≥200 partout).
+      for (const [zone, zb] of Object.entries(blk.vol_zones || {})) {
+        for (const dir of ["long", "short"])
+          pushRow(`&nbsp;&nbsp;↳ vol ${zone} · ${dir}`, zb.n_etat, zb[dir]);
       }
     }
     const r = t.realisme || {};
     document.getElementById("detail-body").innerHTML =
       `<div class="muted" style="margin-bottom:6px">σ_bougie ${pct(r.sigma_bougie)} ·
        CVaR99 ${pct(r.cvar99)} · k_max ${num(r.k_max, 1)} ·
-       coûts (taker) : ${((t.couts||{}).taker||{}).verdict || "—"}</div>
+       coûts (taker) : ${((t.couts||{}).taker||{}).verdict || "—"} ·
+       zone de vol courante (v1.5) : ${t.vol_zone_courante || "—"}</div>
       <table class="det"><tr><th>État · sens</th><th>n état</th><th>p̂ horizon [Wilson]</th>
       <th>n</th><th>Meilleure EV prudente</th><th>walk-fwd</th><th>Statut</th></tr>
       ${rows.join("")}</table>`;

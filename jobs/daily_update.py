@@ -112,6 +112,14 @@ def compute_and_store_matrix(store: Store) -> int:
                 if badge == "overfit" and blk[direction].get("candidate"):
                     blk[direction]["candidate"] = False
                     blk[direction]["motifs"].append("overfit ? (walk-forward)")
+                # v1.5 : les sous-cases (état × zone de vol) héritent du badge
+                # de la case parente — un parent overfit disqualifie ses zones.
+                for zone_blk in blk.get("vol_zones", {}).values():
+                    zone_blk[direction]["walkforward"] = badge
+                    if badge == "overfit" and zone_blk[direction].get("candidate"):
+                        zone_blk[direction]["candidate"] = False
+                        zone_blk[direction]["motifs"].append(
+                            "overfit ? (walk-forward, case parente)")
     store.set_kv("tables_latest", json.dumps({"generated_at": utc_now_iso(),
                                               "timeframes": tables}))
 

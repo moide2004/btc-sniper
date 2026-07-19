@@ -254,11 +254,20 @@ class Worker:
         live["atr"] = float(a.iloc[-1]) if a.iloc[-1] == a.iloc[-1] else float("nan")
         live["cost_r"] = cost_in_r(CONFIG.fee_taker, live["close"], live["atr"])
 
+        # v1.5 (§4) : si la dimension volatilité est ACTIVE pour cette case et
+        # que la zone courante existe, la SOUS-CASE (état × zone) fait foi.
+        zone = tf_table.get("vol_zone_courante")
+        decision_blk = blk
+        etat_decision = current
+        if blk.get("vol_active") and zone in blk.get("vol_zones", {}):
+            decision_blk = blk["vol_zones"][zone]
+            etat_decision = f"{current} [vol {zone}]"
+
         for direction in ("long", "short"):
-            d = blk[direction]
+            d = decision_blk[direction]
             if not d.get("candidate"):
                 continue
-            ticket = build_ticket(stage, current, direction, d, live,
+            ticket = build_ticket(stage, etat_decision, direction, d, live,
                                   self._daily_close_cache, ts_utc=utc_now_iso())
             if ticket is None:
                 continue

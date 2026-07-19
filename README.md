@@ -15,8 +15,13 @@ Instrument de mesure et de validation probabiliste multi-timeframes pour BTC.
 - **P4 — Paper trading** ✅ (code) : tickets (§5.8), livre multi-étages 1h/4h/1D
   (§5.9), exécution limites (§5.10), exécuteur virtuel + journal + cartes de
   verdict (§5.11), walk-forward (§5.12), surveillance CUSUM + acquittement
-  (§5.13). La période d'observation (60 j ou 100 trades) court d'elle-même.
-- **P5 — Bilan** ⏳ : à l'issue de la période P4.
+  (§5.13), funding directionnel (§5.14). La période d'observation (60 j ou
+  100 trades) court d'elle-même (suivi dans l'app).
+- **v1.5 — Dimension volatilité** ✅ : percentile 1 an de vol EWMA (λ=0,94) en
+  3 zones, activée case par case si chaque sous-case garde n ≥ 200 (§4) ;
+  affichée en Vue 2, utilisée par les décisions quand active.
+- **P5 — Bilan** ⏳ : à l'issue de la période P4 (métriques déjà suivies dans
+  la carte « Période de validation »).
 
 > Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
 
