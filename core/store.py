@@ -199,6 +199,20 @@ class Store:
         row = self.conn.execute("SELECT COUNT(*) AS c FROM events WHERE read = 0").fetchone()
         return int(row["c"])
 
+    def mark_events_read(self, up_to_id: Optional[int] = None) -> int:
+        """Marque des événements comme lus. ÉCRITURE autorisée depuis la web app
+        (§7.1) : journalisée dans web_actions."""
+        with self.conn:
+            if up_to_id is None:
+                cur = self.conn.execute("UPDATE events SET read = 1 WHERE read = 0")
+            else:
+                cur = self.conn.execute(
+                    "UPDATE events SET read = 1 WHERE read = 0 AND id <= ?", (up_to_id,))
+            self.conn.execute(
+                "INSERT INTO web_actions (ts_utc, action, target) VALUES (?,?,?)",
+                (utc_now_iso(), "mark_read", str(up_to_id) if up_to_id else "all"))
+            return cur.rowcount
+
     def prune_events(self, days: int = 90) -> int:
         """Rétention 90 jours (§6.2)."""
         with self.conn:

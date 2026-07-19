@@ -128,6 +128,33 @@ def api_evenements():
     return jsonify({"generated_at": utc_now_iso(), "unread": unread, "events": events})
 
 
+@app.route("/api/evenements/lu", methods=["POST"])
+@login_required
+def api_marquer_lu():
+    # Seule écriture autorisée côté web (§7.1) : marquage lu, table dédiée.
+    st = Store(read_only=False)
+    try:
+        n = st.mark_events_read()
+    finally:
+        st.close()
+    return jsonify({"ok": True, "marques_lus": n})
+
+
+@app.route("/api/synthese")
+@login_required
+def api_synthese():
+    # Synthèse bayésienne (§5.6) + référence neutre (§5.7) — snapshot quotidien.
+    import json
+    with _read_store() as st:
+        raw = st.get_kv("synthese_latest")
+    if not raw:
+        return jsonify({"generated_at": utc_now_iso(),
+                        "note": "Synthèse pas encore calculée — lancer daily_update.py."})
+    data = json.loads(raw)
+    data["served_at"] = utc_now_iso()
+    return jsonify(data)
+
+
 @app.route("/api/livre")
 @login_required
 def api_livre():

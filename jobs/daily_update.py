@@ -33,6 +33,7 @@ from core.data_source import (  # noqa: E402
 )
 from core.logging_setup import get_logger  # noqa: E402
 from core.proba_engine import compute_matrix  # noqa: E402
+from core.stack import StackEntry, lognormal_reference, stack  # noqa: E402
 from core.states import daily_sma200_ref  # noqa: E402
 from core.store import Store, utc_now_iso  # noqa: E402
 
@@ -67,15 +68,33 @@ def rebuild_timeframes() -> dict[str, int]:
 
 
 def compute_and_store_matrix(store: Store) -> int:
-    """Calcule la matrice des 11 timeframes (§5) et la stocke (snapshot lu par
-    la web app). Retourne le nombre de cases candidates."""
+    """Calcule la matrice des 11 timeframes (§5) + la synthèse bayésienne (§5.6)
+    + la référence neutre (§5.7), et les stocke (snapshots lus par la web app).
+    Retourne le nombre de cases candidates."""
     df_1d = load_ohlcv("1D")
     daily_ref = daily_sma200_ref(df_1d)
     matrix = compute_matrix(load_ohlcv, daily_ref, CONFIG.fee_taker)
-    payload = {"generated_at": utc_now_iso(), "timeframes": matrix}
-    store.set_kv("matrix_latest", json.dumps(payload))
+    store.set_kv("matrix_latest", json.dumps({"generated_at": utc_now_iso(),
+                                              "timeframes": matrix}))
+
+    # Synthèse bayésienne : combine les probas directionnelles des échelles (§5.6).
+    entries = []
+    for tf in matrix:
+        if tf.get("insuffisant"):
+            continue
+        fh = tf["long"]["horizon_fixe"]
+        entries.append(StackEntry(tf["timeframe"], fh.get("p_hat", float("nan")),
+                                  fh.get("n", 0)))
+    synth = stack(entries)
+    # Référence neutre log-normale à ~1 an (§5.7).
+    ref = lognormal_reference(df_1d["close"].to_numpy("float64"), horizon_days=365) \
+        if not df_1d.empty else {"p_up": float("nan")}
+    store.set_kv("synthese_latest", json.dumps({
+        "generated_at": utc_now_iso(), "synthese": synth, "reference_neutre": ref}))
+
     candidates = sum(1 for tf in matrix if tf.get("candidate"))
-    log.info(f"Matrice calculée : {len(matrix)} timeframes, {candidates} candidate(s)")
+    log.info(f"Matrice calculée : {len(matrix)} timeframes, {candidates} candidate(s) ; "
+             f"synthèse P(hausse)={synth.get('p_up')}")
     return candidates
 
 

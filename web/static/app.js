@@ -58,12 +58,44 @@ async function refreshEvents() {
   try {
     const d = await getJSON("/api/evenements");
     if (!d) return;
+    const badge = document.getElementById("bell-badge");
+    if (d.unread > 0) { badge.style.display = "inline-block"; badge.textContent = d.unread + " non lus"; }
+    else { badge.style.display = "none"; }
     const ul = document.getElementById("events");
     if (!d.events.length) { ul.innerHTML = '<li class="muted">Aucun événement.</li>'; return; }
     ul.innerHTML = d.events.map(e =>
       `<li><b>${e.ts_utc}</b> · [${e.level}] ${e.kind} — ${e.message}</li>`
     ).join("");
   } catch (e) { /* silencieux : réessai au prochain tick */ }
+}
+
+async function markRead() {
+  try {
+    await fetch("/api/evenements/lu", { method: "POST", credentials: "same-origin" });
+    refreshEvents();
+  } catch (e) {}
+}
+
+async function refreshSynthese() {
+  try {
+    const d = await getJSON("/api/synthese");
+    if (!d) return;
+    const box = document.getElementById("synthese");
+    document.getElementById("syn-gen").textContent = d.generated_at || (d.note || "—");
+    const s = d.synthese;
+    if (!s || isNaN(s.p_up)) { box.innerHTML = `<div class="muted">${d.note || "Pas encore de synthèse."}</div>`; return; }
+    const ref = d.reference_neutre || {};
+    const contribs = (s.contributions || []).slice(0, 6).map(c =>
+      `<span>${c.timeframe}: ${(c.contribution >= 0 ? "+" : "")}${c.contribution.toFixed(2)} (p̂ ${pct(c.p_up)})</span>`
+    ).join("");
+    box.innerHTML = `<div class="syn">
+        <div><div class="k">P(hausse) globale</div><div class="big">${pct(s.p_up)}</div>
+          ${s.capped ? '<span class="muted">(plafonné 85 %)</span>' : ''}</div>
+        <div><div class="k">Référence neutre (~1 an)</div><div class="big">${pct(ref.p_up)}</div></div>
+        <div><div class="k">Échelles combinées</div><div class="big">${s.n_timeframes}</div></div>
+      </div>
+      <div class="contrib">Contributions principales : ${contribs || "—"}</div>`;
+  } catch (e) { /* réessai au prochain tick */ }
 }
 
 async function refreshLivre() {
@@ -111,7 +143,10 @@ async function refreshMatrix() {
   } catch (e) { /* réessai au prochain tick */ }
 }
 
-refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix();
+const mrBtn = document.getElementById("mark-read");
+if (mrBtn) mrBtn.addEventListener("click", markRead);
+
+refreshHealth(); refreshEvents(); refreshLivre(); refreshMatrix(); refreshSynthese();
 setInterval(refreshLivre, 5000);           // §6.3
 setInterval(() => { refreshHealth(); refreshEvents(); }, 15000);
-setInterval(refreshMatrix, 15000);
+setInterval(() => { refreshMatrix(); refreshSynthese(); }, 15000);
