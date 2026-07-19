@@ -311,6 +311,11 @@ def main() -> None:
     ds = DataSource(store=store, logger=log)
 
     log.info("=== Cycle quotidien : début ===")
+    try:
+        from core.data_source import migrate_to_segments
+        migrate_to_segments("1m", logger=log)
+    except Exception as e:
+        log.error(f"Migration segments : {e!r}")
     filled = ds.fill_gaps()
     if filled:
         log.info(f"Trous comblés avant recalcul : {filled}")

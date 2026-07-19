@@ -96,10 +96,13 @@ def test_cache_and_continuity() -> None:
     print("[2] Cache parquet + continuité")
     df = make_1m(120)
     save_ohlcv_atomic(df, "1m")
-    check("parquet écrit atomiquement", (CONFIG.ohlcv_dir / "BTCUSDT_1m.parquet").exists())
+    seg_dir = CONFIG.ohlcv_dir / "BTCUSDT_1m_segments"
+    check("parquet écrit atomiquement (segments mensuels)",
+          seg_dir.exists() and len(list(seg_dir.glob("*.parquet"))) >= 1)
     check("dernier open_time correct", last_open_time("1m") == int(df["open_time"].iloc[-1]))
     # Append avec chevauchement -> dédup
-    merged = append_ohlcv(df.tail(10), "1m")
+    append_ohlcv(df.tail(10), "1m")
+    merged = load_ohlcv("1m")
     check("dédup sur append", len(merged) == 120 and count_duplicates(merged) == 0)
     # Trou : retirer les minutes 50..54
     holed = pd.concat([df.iloc[:50], df.iloc[55:]], ignore_index=True)

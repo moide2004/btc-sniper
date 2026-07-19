@@ -152,9 +152,10 @@ class Worker:
             {"generated_at": utc_now_iso(), **cards}))
 
     def _stage_bars(self, stage: str, n_bars: int = 300, df_1m=None):
-        if df_1m is None:
-            df_1m = load_ohlcv("1m")
         need = n_bars * (TF_MS[stage] // MINUTE_MS)
+        if df_1m is None:
+            from core.data_source import load_ohlcv_tail
+            return resample_1m(load_ohlcv_tail("1m", need), stage)
         return resample_1m(df_1m.tail(need), stage)
 
     def _process_new_candles(self, rows: list[dict]) -> None:
@@ -326,6 +327,12 @@ class Worker:
     # ----- Reprise (§7.3) ---------------------------------------------------
     def startup_recovery(self) -> None:
         log.info("Démarrage worker : reprise de l'état persistant")
+        # Migration UNE FOIS du cache 1m vers les segments mensuels (idempotent).
+        try:
+            from core.data_source import migrate_to_segments
+            migrate_to_segments("1m", logger=log)
+        except Exception as e:
+            log.error(f"Migration segments : {e!r}")
         # Battement immédiat : le bandeau montre le redémarrage plutôt qu'un
         # faux « worker absent » pendant un long backfill (§7.3).
         self._beat_if_due()

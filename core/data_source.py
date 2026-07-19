@@ -65,13 +65,80 @@ def _empty_klines() -> pd.DataFrame:
 
 # ===========================================================================
 # Cache OHLCV parquet (écriture atomique, §7.2)
+#
+# Le 1m — écrit CHAQUE minute par le worker — est SEGMENTÉ PAR MOIS
+# (data/ohlcv/BTCUSDT_1m_segments/AAAA-MM.parquet) : chaque minute ne réécrit
+# que le segment du mois courant (~2 Mo) au lieu du fichier entier (~45 Mo).
+# Format et atomicité inchangés (§7.2). Les autres TF (écrites 1×/jour)
+# restent en fichier unique. Migration automatique de l'ancien format.
 # ===========================================================================
+SEGMENTED_TF = {"1m"}
+
+
 def cache_path(timeframe: str = "1m", symbol: Optional[str] = None) -> Path:
     symbol = symbol or CONFIG.symbol
     return CONFIG.ohlcv_dir / f"{symbol}_{timeframe}.parquet"
 
 
+def _seg_dir(timeframe: str) -> Path:
+    return CONFIG.ohlcv_dir / f"{CONFIG.symbol}_{timeframe}_segments"
+
+
+def _seg_key(open_time_ms: int) -> str:
+    return datetime.fromtimestamp(open_time_ms / 1000, timezone.utc).strftime("%Y-%m")
+
+
+def _atomic_parquet(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    df.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
+
+
+def _segments(timeframe: str) -> list[Path]:
+    d = _seg_dir(timeframe)
+    return sorted(d.glob("*.parquet")) if d.exists() else []
+
+
+def _is_segmented(timeframe: str) -> bool:
+    """Le mode segmenté fait foi dès que l'ancien fichier unique est absent
+    (bascule atomique en fin de migration ; un système neuf démarre
+    directement en segments)."""
+    return timeframe in SEGMENTED_TF and not cache_path(timeframe).exists()
+
+
+def migrate_to_segments(timeframe: str = "1m", logger=None) -> bool:
+    """Migration UNE FOIS de l'ancien fichier unique vers les segments
+    mensuels. Idempotente ; l'ancien fichier n'est supprimé qu'après
+    vérification du compte de lignes (bascule atomique)."""
+    legacy = cache_path(timeframe)
+    if timeframe not in SEGMENTED_TF or not legacy.exists():
+        return False
+    df = pd.read_parquet(legacy).sort_values("open_time").reset_index(drop=True)
+    keys = df["open_time"].map(_seg_key)
+    total = 0
+    for key, part in df.groupby(keys):
+        _atomic_parquet(part.reset_index(drop=True), _seg_dir(timeframe) / f"{key}.parquet")
+        total += len(part)
+    if total != len(df):  # sécurité : jamais de perte silencieuse
+        if logger:
+            logger.error(f"Migration {timeframe} : comptes différents "
+                         f"({total} vs {len(df)}) — ancien fichier conservé")
+        return False
+    legacy.unlink()
+    if logger:
+        logger.info(f"Cache {timeframe} migré en {keys.nunique()} segment(s) "
+                    f"mensuel(s) ({total} bougies)")
+    return True
+
+
 def load_ohlcv(timeframe: str = "1m") -> pd.DataFrame:
+    if _is_segmented(timeframe):
+        parts = [pd.read_parquet(p) for p in _segments(timeframe)]
+        if not parts:
+            return _empty_klines()
+        df = pd.concat(parts, ignore_index=True)
+        return df.sort_values("open_time").reset_index(drop=True)
     p = cache_path(timeframe)
     if not p.exists():
         return _empty_klines()
@@ -79,29 +146,98 @@ def load_ohlcv(timeframe: str = "1m") -> pd.DataFrame:
     return df.sort_values("open_time").reset_index(drop=True)
 
 
-def save_ohlcv_atomic(df: pd.DataFrame, timeframe: str = "1m") -> None:
-    """Écrit le parquet via fichier temporaire + os.replace (renommage
-    atomique — §7.2 : toute écriture fichier = temp puis renommage)."""
+def cache_stats(timeframe: str = "1m") -> tuple[int, Optional[int]]:
+    """(nb bougies, dernière open_time) via les MÉTADONNÉES parquet — sans
+    charger les fichiers (pour le polling /api/health)."""
+    import pyarrow.parquet as pq
+
+    def _last_of(path: Path) -> Optional[int]:
+        f = pq.ParquetFile(path)
+        if f.metadata.num_rows == 0:
+            return None
+        rg = f.read_row_group(f.metadata.num_row_groups - 1, columns=["open_time"])
+        return int(rg.column(0)[-1].as_py())
+
+    if _is_segmented(timeframe):
+        segs = _segments(timeframe)
+        if not segs:
+            return 0, None
+        n = sum(pq.ParquetFile(p).metadata.num_rows for p in segs)
+        return n, _last_of(segs[-1])
     p = cache_path(timeframe)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + f".tmp.{os.getpid()}")
+    if not p.exists():
+        return 0, None
+    return int(pq.ParquetFile(p).metadata.num_rows), _last_of(p)
+
+
+def load_ohlcv_tail(timeframe: str, n_rows: int) -> pd.DataFrame:
+    """Charge seulement les ~n_rows dernières bougies (lecture des derniers
+    segments uniquement — évite de relire 2 ans de 1m à chaque clôture d'étage)."""
+    if not _is_segmented(timeframe):
+        df = load_ohlcv(timeframe)
+        return df.tail(n_rows).reset_index(drop=True)
+    parts: list[pd.DataFrame] = []
+    got = 0
+    for p in reversed(_segments(timeframe)):
+        part = pd.read_parquet(p)
+        parts.append(part)
+        got += len(part)
+        if got >= n_rows:
+            break
+    if not parts:
+        return _empty_klines()
+    df = pd.concat(list(reversed(parts)), ignore_index=True)
+    return df.sort_values("open_time").tail(n_rows).reset_index(drop=True)
+
+
+def save_ohlcv_atomic(df: pd.DataFrame, timeframe: str = "1m") -> None:
+    """Écrit le cache via fichier temporaire + os.replace (renommage atomique —
+    §7.2). Pour une TF segmentée : un fichier par mois."""
     df = df.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
-    df.to_parquet(tmp, index=False)
-    os.replace(tmp, p)
+    if _is_segmented(timeframe):
+        # Mode segmenté (natif dès le premier démarrage post-migration).
+        existing = {p.stem for p in _segments(timeframe)}
+        keys = df["open_time"].map(_seg_key)
+        for key, part in df.groupby(keys):
+            _atomic_parquet(part.reset_index(drop=True),
+                            _seg_dir(timeframe) / f"{key}.parquet")
+            existing.discard(key)
+        for stale in existing:  # segments hors du nouveau contenu : purgés
+            (_seg_dir(timeframe) / f"{stale}.parquet").unlink(missing_ok=True)
+        return
+    p = cache_path(timeframe)
+    _atomic_parquet(df, p)
 
 
-def append_ohlcv(new_rows: pd.DataFrame, timeframe: str = "1m") -> pd.DataFrame:
-    """Fusionne de nouvelles bougies dans le cache (dédup sur open_time)."""
+def append_ohlcv(new_rows: pd.DataFrame, timeframe: str = "1m") -> None:
+    """Fusionne de nouvelles bougies dans le cache (dédup sur open_time).
+    En mode segmenté, seuls les segments TOUCHÉS sont réécrits (~2 Mo/min au
+    lieu du fichier entier)."""
     if new_rows is None or new_rows.empty:
-        return load_ohlcv(timeframe)
+        return
+    new_rows = new_rows[KLINE_COLS]
+    if _is_segmented(timeframe):
+        keys = new_rows["open_time"].map(_seg_key)
+        for key, part in new_rows.groupby(keys):
+            seg = _seg_dir(timeframe) / f"{key}.parquet"
+            cur = pd.read_parquet(seg) if seg.exists() else _empty_klines()
+            merged = pd.concat([cur, part], ignore_index=True)
+            merged = (merged.sort_values("open_time")
+                      .drop_duplicates("open_time").reset_index(drop=True))
+            _atomic_parquet(merged, seg)
+        return
     cur = load_ohlcv(timeframe)
-    merged = pd.concat([cur, new_rows[KLINE_COLS]], ignore_index=True)
+    merged = pd.concat([cur, new_rows], ignore_index=True)
     merged = merged.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
     save_ohlcv_atomic(merged, timeframe)
-    return merged
 
 
 def last_open_time(timeframe: str = "1m") -> Optional[int]:
+    if _is_segmented(timeframe):
+        segs = _segments(timeframe)
+        if not segs:
+            return None
+        return int(pd.read_parquet(segs[-1], columns=["open_time"])["open_time"].max())
     df = load_ohlcv(timeframe)
     if df.empty:
         return None

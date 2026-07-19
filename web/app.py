@@ -121,21 +121,11 @@ def index():
 # Endpoints JSON — chacun renvoie generated_at (§6.3)
 # --------------------------------------------------------------------------
 def _cache_1m_stats() -> tuple[int, int | None]:
-    """(nb bougies, dernière open_time) via les MÉTADONNÉES parquet — sans
-    charger le fichier entier à chaque poll (sobriété §2.5)."""
-    from core.data_source import cache_path
-    p = cache_path("1m")
-    if not p.exists():
-        return 0, None
+    """(nb bougies, dernière open_time) via les métadonnées parquet —
+    compatible cache segmenté (sobriété §2.5)."""
     try:
-        import pyarrow.parquet as pq
-        f = pq.ParquetFile(p)
-        n = int(f.metadata.num_rows)
-        if n == 0:
-            return 0, None
-        last_rg = f.read_row_group(f.metadata.num_row_groups - 1,
-                                   columns=["open_time"])
-        return n, int(last_rg.column(0)[-1].as_py())
+        from core.data_source import cache_stats
+        return cache_stats("1m")
     except Exception:
         df = load_ohlcv("1m")  # repli : lecture complète
         return int(len(df)), (int(df["open_time"].iloc[-1]) if len(df) else None)
