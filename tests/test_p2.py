@@ -205,6 +205,17 @@ def test_matrix_end_to_end():
         b = sample["long"]["horizon_fixe"]
         check("p̂ accompagné de n et Wilson", "n" in b and "wilson" in b)
         check("verdict de coûts présent", "taker" in sample["couts"])
+        # §5.1 : les TROIS horizons mesurés, toutes timeframes.
+        hz = sample["long"]["horizons"]
+        check("3 horizons présents (5/10/20)", set(hz.keys()) == {"5", "10", "20"})
+        check("chaque horizon complet (p̂, n, Wilson, posterior)",
+              all(all(k in hz[h] for k in ("p_hat", "n", "wilson", "posterior"))
+                  for h in hz))
+        check("H5 a ~2× plus d'échantillons que H10",
+              hz["5"]["n"] > hz["10"]["n"] * 1.5,
+              f"n5={hz['5']['n']} vs n10={hz['10']['n']}")
+        check("horizon_fixe == horizons['10']",
+              b["p_hat"] == hz["10"]["p_hat"] and b["n"] == hz["10"]["n"])
 
 
 def main():

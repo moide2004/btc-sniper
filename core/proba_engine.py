@@ -252,6 +252,7 @@ def build_measure(k: int, n: int, rr: float, cost_r: float, funding_r: float = 0
 # ===========================================================================
 # Assemblage de la MATRICE (§5.8 candidates, §5.14 shorts) — sert la Vue 1
 # ===========================================================================
+HORIZON_SET = (5, 10, 20)     # §5.1 : H ∈ {5, 10, 20}
 HORIZON_DEFAULT = 10          # §5.1 (défaut 10)
 RR_SET = (1.0, 1.5, 2.0)      # §5.1
 N_MIN = 200                   # §5.8 : case candidate si n ≥ 200
@@ -266,12 +267,17 @@ def _direction_block(
 ) -> dict:
     """`funding_ctx` (§5.14) : {"annualized": taux signé, "price_over_atr": x}
     ou None si le funding est indisponible → F = 0 + badge."""
-    # Probabilité directionnelle à horizon fixe : MESURE D'ISSUE pure (p̂, n,
-    # intervalle, posterior). Aucune EV publiée ici — une EV sans coûts
-    # violerait l'invariant §9 ; les EV vivent dans les barrières (avec coûts).
-    fh_k, fh_n = fixed_horizon_counts(df["close"], HORIZON_DEFAULT, mask, direction)
-    fh_m = build_measure(fh_k, fh_n, rr=1.0, cost_r=0.0).to_dict()
-    fh = {k: fh_m[k] for k in ("n", "k", "p_hat", "wilson", "posterior")}
+    # Probabilités directionnelles à horizon fixe, pour les TROIS horizons du
+    # §5.1 (H ∈ {5, 10, 20}) : MESURES D'ISSUE pures (p̂, n, intervalle,
+    # posterior). Aucune EV publiée ici — une EV sans coûts violerait
+    # l'invariant §9 ; les EV vivent dans les barrières (avec coûts).
+    def _fh(h: int) -> dict:
+        k_, n_ = fixed_horizon_counts(df["close"], h, mask, direction)
+        m_ = build_measure(k_, n_, rr=1.0, cost_r=0.0).to_dict()
+        return {k: m_[k] for k in ("n", "k", "p_hat", "wilson", "posterior")}
+
+    horizons = {str(h): _fh(h) for h in HORIZON_SET}
+    fh = horizons[str(HORIZON_DEFAULT)]  # H=10 reste la référence (Vue 1, synthèse)
 
     # Double barrière aux trois RR (§5.1). Funding (§5.14) :
     # F = funding moyen 7 j annualisé × durée de détention médiane, en R ;
@@ -329,6 +335,7 @@ def _direction_block(
     return {
         "direction": direction,
         "horizon_fixe": {"H": HORIZON_DEFAULT, **fh},
+        "horizons": horizons,  # les trois H du §5.1, toutes timeframes
         "barrieres": barriers,
         "best": best,
         "candidate": candidate,

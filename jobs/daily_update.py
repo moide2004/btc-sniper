@@ -277,6 +277,16 @@ def backup_db(store_path: Path) -> Path | None:
     dest = dest_dir / "moteur.db"
     src = sqlite3.connect(store_path)
     try:
+        # Garde d'intégrité : ne JAMAIS écraser une sauvegarde saine avec un
+        # instantané d'une base corrompue (§7.7).
+        try:
+            ok = src.execute("PRAGMA quick_check;").fetchone()[0] == "ok"
+        except sqlite3.DatabaseError:
+            ok = False
+        if not ok:
+            log.error("Base corrompue détectée : sauvegarde du jour NON écrasée "
+                      "— restaurer depuis backups/ (procédure README §5)")
+            return None
         with sqlite3.connect(dest) as bck:
             src.backup(bck)  # instantané cohérent, y compris WAL
     finally:

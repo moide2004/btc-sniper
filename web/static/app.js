@@ -188,10 +188,20 @@ async function showDetail(tf) {
     const rows = [];
     const pushRow = (label, nEtat, b) => {
       const fh = b.horizon_fixe || {}; const best = b.best;
+      const hz = b.horizons || {};
+      const hzTxt = ["5", "10", "20"].map(h => {
+        const x = hz[h]; if (!x) return "";
+        return `H${h} ${pct(x.p_hat)}<span class="lab"> (n=${x.n})</span>`;
+      }).filter(Boolean).join(" · ") || `${pct(fh.p_hat)}`;
+      const rrTxt = (b.barrieres || []).map(x => {
+        const isBest = best && x.rr === best.rr;
+        const v = `RR${x.rr}: ${num(x.ev_nette_prudente)}`;
+        return isBest ? `<b>${v}</b>` : v;
+      }).join(" · ") || "—";
       rows.push(`<tr><td>${label}</td><td>${nEtat}</td>
-        <td>${pct(fh.p_hat)} [${pct((fh.wilson||{}).low)}–${pct((fh.wilson||{}).high)}]</td>
+        <td>${hzTxt}<br><span class="lab">H10 Wilson [${pct((fh.wilson||{}).low)}–${pct((fh.wilson||{}).high)}]</span></td>
         <td>${fh.n ?? 0}</td>
-        <td>${best ? "RR " + best.rr + " → " + num(best.ev_nette_prudente) + " R" : "—"}</td>
+        <td>${rrTxt} R</td>
         <td>${b.walkforward || "n/a"}</td>
         <td>${b.candidate ? '<span class="pill ok">candidate</span>'
                           : (b.motifs || []).join(", ") || "—"}</td></tr>`);
@@ -210,8 +220,10 @@ async function showDetail(tf) {
        CVaR99 ${pct(r.cvar99)} · k_max ${num(r.k_max, 1)} ·
        coûts (taker) : ${((t.couts||{}).taker||{}).verdict || "—"} ·
        zone de vol courante (v1.5) : ${t.vol_zone_courante || "—"}</div>
-      <table class="det"><tr><th>État · sens</th><th>n état</th><th>p̂ horizon [Wilson]</th>
-      <th>n</th><th>Meilleure EV prudente</th><th>walk-fwd</th><th>Statut</th></tr>
+      <table class="det"><tr><th>État · sens</th><th>n état</th>
+      <th>p̂ aux 3 horizons (§5.1)</th>
+      <th>n (H10)</th><th>EV nette prudente par RR (meilleur en gras)</th>
+      <th>walk-fwd</th><th>Statut</th></tr>
       ${rows.join("")}</table>`;
   } catch (e) {}
 }
