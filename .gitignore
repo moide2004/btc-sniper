@@ -17,3 +17,14 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Sous-projets (bot-desequilibre, trend-pullback) — mêmes règles
+**/data/moteur.db
+**/data/moteur.db-wal
+**/data/moteur.db-shm
+**/data/ohlcv/*.parquet
+**/data/ohlcv/**/*.parquet
+**/logs/*.log
+**/logs/*.log.*
+**/backups/
+**/.venv/
