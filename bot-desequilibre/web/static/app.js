@@ -1,10 +1,19 @@
 // Live par polling (§6). Pas de websocket entrant : le navigateur interroge des
-// endpoints JSON. Bandeau ⚠ si heartbeat worker > 120 s.
+// endpoints JSON. 4 vues (Santé · Matrice · Tickets · Livre). ⚠ si worker en retard.
+const TF_ORDER = ["15m", "30m", "1h", "4h", "12h", "1D"];
+
 function fmtUtcMs(ms){ if(ms==null) return "—";
   return new Date(ms).toISOString().replace("T"," ").replace(".000Z"," UTC"); }
 function fmtAge(s){ if(s==null) return "—";
   if(s<60) return Math.round(s)+" s"; if(s<3600) return Math.round(s/60)+" min";
   return Math.round(s/3600)+" h"; }
+function pct(p,d=1){ return p==null? "—" : (100*p).toFixed(d)+" %"; }
+function num(x,d=2){ return x==null? "—" : Number(x).toFixed(d); }
+function signed(x,d=2){ if(x==null) return "—"; const v=Number(x); return (v>=0?"+":"")+v.toFixed(d); }
+function evClass(x){ return x==null? "" : (x>0?"good":"bad"); }
+function wfClass(s){ return s? "wf-"+s : ""; }
+function isSolide(c){ return c && c.ev_prudent_taker!=null && c.ev_prudent_taker>0
+  && (c.n||0)>=200 && !["overfit","disqualifie"].includes((c.wf||{}).status); }
 
 let healthFails = 0;
 async function getJSON(url){
@@ -14,6 +23,15 @@ async function getJSON(url){
   return r.json();
 }
 
+// ---- Onglets ---------------------------------------------------------------
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+  document.getElementById("v-"+t.dataset.view).classList.add("active");
+}));
+
+// ---- Vue Santé -------------------------------------------------------------
 async function refreshHealth(){
   try{
     const h = await getJSON("/api/health"); if(!h) return; healthFails=0;
@@ -55,8 +73,80 @@ async function refreshEvents(){
       `<li><b>${e.ts_utc}</b> · [${e.level}] ${e.kind} — ${e.message}</li>`).join("");
   }catch(e){}
 }
-async function refreshLivre(){ try{ await getJSON("/api/livre"); }catch(e){} }
 
-refreshHealth(); refreshEvents(); refreshLivre();
-setInterval(refreshLivre, 5000);
-setInterval(()=>{ refreshHealth(); refreshEvents(); }, 15000);
+// ---- Vue Matrice (§3) ------------------------------------------------------
+async function refreshMatrice(){
+  try{
+    const d = await getJSON("/api/probas"); if(!d) return;
+    document.getElementById("rrlive").textContent = num(d.rr_live,1);
+    const c = d.corr_btc_eth;
+    document.getElementById("corr").textContent = c==null? "—" : num(c,2);
+    document.getElementById("corr2").textContent = c==null? "—" : num(c,2);
+    const cases = (d.cases||[]).slice().sort((a,b)=>
+      a.symbol.localeCompare(b.symbol) ||
+      TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
+      a.direction.localeCompare(b.direction));
+    const body=document.getElementById("mat-body");
+    if(!cases.length){ body.innerHTML='<tr><td class="muted" colspan="10">Matrice vide — lancer <code>jobs/daily_update.py</code>.</td></tr>'; }
+    else{
+      body.innerHTML = cases.map(c=>{
+        const wf=c.wf||{}, w=c.wilson||[null,null], sol=isSolide(c);
+        return `<tr>
+          <td><span class="pill ${sol?'solide':'spec'}">${sol?'solide':'spéc.'}</span>
+              ${c.symbol} · ${c.timeframe} · <span class="${c.direction}">${c.direction}</span></td>
+          <td>${c.n==null?'—':c.n}</td><td>${pct(c.p_hat)}</td>
+          <td>${w[0]==null?'—':pct(w[0],0)+'–'+pct(w[1],0)}</td>
+          <td>${pct(c.p_prudent)}</td>
+          <td class="${evClass(c.ev_prudent_taker)}">${signed(c.ev_prudent_taker)}</td>
+          <td class="${evClass(c.ev_prudent_maker)}">${signed(c.ev_prudent_maker)}</td>
+          <td>${c.k_max==null?'—':c.k_max}</td><td>${num(c.cvar99_r)}</td>
+          <td class="${wfClass(wf.status)}">${wf.status||'—'}${wf.retention!=null?' ('+num(wf.retention,2)+')':''}</td>
+        </tr>`;
+      }).join("");
+    }
+    document.getElementById("b-mat").textContent = cases.filter(isSolide).length;
+  }catch(e){}
+}
+
+// ---- Vue Tickets -----------------------------------------------------------
+async function refreshTickets(){
+  try{
+    const d = await getJSON("/api/tickets"); if(!d) return;
+    const tks=d.tickets||[];
+    document.getElementById("b-tk").textContent = tks.length;
+    const grid=document.getElementById("tk-grid");
+    if(!tks.length){ grid.innerHTML='<div class="muted">Aucun ticket. Un ticket est émis dès qu\'un setup §2 se valide à la clôture d\'une bougie d\'analyse.</div>'; }
+    else{
+      grid.innerHTML = tks.map(t=>{
+        const p=t.proba||{}, s=t.sizing||{}, sol=p.solide;
+        return `<div class="tk">
+          <h3><span class="${t.direction}">${(t.direction||'').toUpperCase()}</span>
+              ${t.symbol} · ${t.timeframe}
+              <span class="pill ${sol?'solide':'spec'}" style="margin-left:auto">${p.annotation||'—'}</span></h3>
+          <div class="lv"><span class="k">Entrée${t.entry_is_proxy?' (proxy)':''}</span><span>${num(t.entry_ref)}</span></div>
+          <div class="lv"><span class="k">SL / TP</span><span>${num(t.sl)} / ${num(t.tp)}</span></div>
+          <div class="lv"><span class="k">Taille (risque)</span><span>${num(s.size_units,4)} · ${num(s.risk_usd,0)}$ (${num(s.risk_pct_capital,2)}%)</span></div>
+          <div class="lv"><span class="k">p̂ · p prudent</span><span>${pct(p.p_hat)} · ${pct(p.p_prudent)} <span class="k">(n=${p.n??'—'})</span></span></div>
+          <div class="lv"><span class="k">EV prud. (taker)</span><span class="${evClass(p.ev_prudent_taker)}">${signed(p.ev_prudent_taker)}</span></div>
+          <div class="lv"><span class="k">walk-forward</span><span class="${wfClass(p.wf_status)}">${p.wf_status||'—'}</span></div>
+          <div class="lv"><span class="k">${t.ts_utc}</span><span></span></div>
+        </div>`;
+      }).join("");
+    }
+    const nsol=tks.filter(t=>(t.proba||{}).solide).length;
+    document.getElementById("tk-counts").textContent = nsol+" / "+(tks.length-nsol);
+  }catch(e){}
+}
+
+// ---- Vue Livre (§5.4) ------------------------------------------------------
+async function refreshLivre(){
+  try{
+    const d = await getJSON("/api/livre"); if(!d) return;
+    document.getElementById("risk-open").textContent = num(d.risque_ouvert_pct,2)+" %";
+    document.getElementById("risk-cap").textContent = num(d.plafond_pct,1)+" %";
+  }catch(e){}
+}
+
+function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); }
+refreshAll();
+setInterval(refreshAll, 15000);

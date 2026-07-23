@@ -136,9 +136,9 @@ def api_livre():
     return jsonify({
         "generated_at": utc_now_iso(),
         "worker_stale": (age is None) or (age > STALE_AFTER_S),
-        "risque_ouvert_pct": 0.0, "plafond_pct": 4.0,
+        "risque_ouvert_pct": 0.0, "plafond_pct": CONFIG.risk_cap_pct,
         "positions": [], "tickets_actifs": [], "tickets_bloques": [],
-        "note": "Livre alimenté en P4 (paper trading BTC+ETH).",
+        "note": "Positions alimentées en P4 (paper trading BTC+ETH).",
     })
 
 

@@ -1,4 +1,4 @@
-# Bot Déséquilibré — P1 + P2 (Socle données + moteur Fibonacci/probas, BTC + ETH)
+# Bot Déséquilibré — P1 + P2 + P3 (Socle · moteur Fibonacci/probas · mini-app, BTC + ETH)
 
 Analyste de trading multi-timeframes fondé sur les cassures de Fibonacci
 (**il signale, il n'exécute jamais**).
@@ -14,6 +14,12 @@ qui n'est que le substrat) + couche probabiliste §3 (double barrière TP/SL
 mesurée sur le 1m, Wilson 95 %, Beta q25, EV nette taker+maker, réalisme, walk-
 forward). Émission de **tickets** annotés « solide »/« spéculatif » dès qu'un
 setup est valide ; recalcul des tables la nuit (00:10 UTC).
+
+**Phase 3 livrée** : mini-app web **4 vues** (onglets, sans dépendance JS) —
+**Santé** (bandeau d'âge, source, corrélation, cloche), **Matrice** (probas §3
+par actif×TF×direction : p̂, Wilson, p_prudent, EV, k_max, CVaR99, walk-forward,
+badge solide/spéculatif), **Tickets** (setups vivants), **Livre & budget** (§5.4,
+positions en P4). Live par polling ; ⚠ si worker en retard.
 
 > Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
 
