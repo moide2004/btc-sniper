@@ -22,6 +22,7 @@ from core.data_source import (  # noqa: E402
     DataSource, count_duplicates, find_gaps, load_ohlcv, resample_1m,
     save_ohlcv_atomic,
 )
+from core.engine import recompute_proba_tables  # noqa: E402
 from core.logging_setup import get_logger  # noqa: E402
 from core.store import Store  # noqa: E402
 
@@ -101,6 +102,18 @@ def main() -> None:
         if filled:
             log.info(f"Trous comblés {sym} avant recalcul : {filled}")
     counts = rebuild_timeframes()
+
+    try:                                        # §2/§3 : tables probabilistes
+        summ = recompute_proba_tables(store, logger=log)
+        store.prune_tickets(120)
+        log.info(f"Tables §3 recalculées : {summ['n_blocks']} bloc(s), "
+                 f"{summ['n_setups']} setup(s) historiques")
+        store.add_event("worker", "info",
+                        f"Matrice Fibonacci recalculée ({summ['n_blocks']} blocs)",
+                        summ)
+    except Exception as e:
+        log.error(f"Recalcul §3 en échec (poursuite) : {e!r}")
+        store.add_event("performance", "warning", f"Recalcul §3 échoué : {e!r}")
 
     gaps = {sym: len(find_gaps(load_ohlcv(sym, "1m"))) for sym in CONFIG.symbols}
     dups = {sym: count_duplicates(load_ohlcv(sym, "1m")) for sym in CONFIG.symbols}

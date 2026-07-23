@@ -167,6 +167,78 @@ class Store:
                 (utc_now_iso(), action, target))
             return int(cur.lastrowid)
 
+    # ----- Probas §3 (une ligne par recalcul ; on lit la plus récente) ----
+    def record_proba(self, symbol: str, timeframe: str, direction: str,
+                     payload: dict) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO probas (ts_utc, symbol, timeframe, direction, payload) "
+                "VALUES (?,?,?,?,?)",
+                (utc_now_iso(), symbol, timeframe, direction, json.dumps(payload)))
+            return int(cur.lastrowid)
+
+    def latest_proba(self, symbol: str, timeframe: str,
+                     direction: str) -> Optional[dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT ts_utc, payload FROM probas WHERE symbol=? AND timeframe=? "
+            "AND direction=? ORDER BY id DESC LIMIT 1",
+            (symbol, timeframe, direction)).fetchone()
+        if not row:
+            return None
+        d = json.loads(row["payload"])
+        d["_ts_utc"] = row["ts_utc"]
+        return d
+
+    def all_latest_probas(self) -> list[dict[str, Any]]:
+        """Dernier bloc §3 de chaque (symbol, timeframe, direction)."""
+        rows = self.conn.execute(
+            """SELECT p.symbol, p.timeframe, p.direction, p.ts_utc, p.payload
+               FROM probas p JOIN (
+                   SELECT symbol, timeframe, direction, MAX(id) AS mid FROM probas
+                   GROUP BY symbol, timeframe, direction) g
+               ON p.id = g.mid ORDER BY p.symbol, p.timeframe, p.direction""").fetchall()
+        out = []
+        for r in rows:
+            out.append({"symbol": r["symbol"], "timeframe": r["timeframe"],
+                        "direction": r["direction"], "ts_utc": r["ts_utc"],
+                        "payload": json.loads(r["payload"])})
+        return out
+
+    def prune_probas(self, keep_per_key: int = 3) -> int:
+        """Ne garde que les `keep_per_key` recalculs les plus récents par clé."""
+        with self.conn:
+            return self.conn.execute(
+                """DELETE FROM probas WHERE id NOT IN (
+                     SELECT id FROM (
+                       SELECT id, ROW_NUMBER() OVER (
+                         PARTITION BY symbol, timeframe, direction
+                         ORDER BY id DESC) AS rn FROM probas)
+                     WHERE rn <= ?)""", (keep_per_key,)).rowcount
+
+    # ----- Tickets §3 (émis dès qu'un setup §2 est valide) ----------------
+    def emit_ticket(self, symbol: str, timeframe: str, payload: dict) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO tickets (ts_utc, symbol, timeframe, payload) VALUES (?,?,?,?)",
+                (utc_now_iso(), symbol, timeframe, json.dumps(payload)))
+            return int(cur.lastrowid)
+
+    def list_tickets(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id, ts_utc, symbol, timeframe, payload FROM tickets "
+            "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            out.append({"id": r["id"], "ts_utc": r["ts_utc"], "symbol": r["symbol"],
+                        "timeframe": r["timeframe"], **json.loads(r["payload"])})
+        return out
+
+    def prune_tickets(self, days: int = 120) -> int:
+        with self.conn:
+            return self.conn.execute(
+                "DELETE FROM tickets WHERE ts_utc < datetime('now', ?)",
+                (f"-{int(days)} days",)).rowcount
+
     # ----- Santé / config -------------------------------------------------
     def record_health(self, cycle_kind: str, duration_s=None, cpu_s=None,
                       peak_mem_mb=None, clock_skew_s=None, note=None) -> None:

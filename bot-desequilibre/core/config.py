@@ -53,6 +53,25 @@ class Config:
         self.risk_pct = float(_get("RISK_PCT", "0.015"))
         self.short_risk_factor = float(_get("SHORT_RISK_FACTOR", "0.75"))
 
+        # --- Stratégie §2 (paramètres NOMMÉS au BRIEF ; défauts épinglés) -----
+        # Les valeurs sans défaut explicite au BRIEF sont marquées (†) : à
+        # confirmer par l'humain (§9.1). Aucun paramètre/indicateur en plus.
+        self.fib_lookback = int(_get("FIB_LOOKBACK", "50"))          # §2 défaut 50
+        self.buffer_atr = float(_get("BUFFER_ATR", "0.10"))          # (†) distance à la cassure
+        self.activer_shorts = _get("ACTIVER_SHORTS", "1").strip().lower() in ("1", "true", "yes", "oui")
+        self.stop_max_atr = float(_get("STOP_MAX_ATR", "3.0"))       # §2 défaut 3
+        self.stop_min_atr = float(_get("STOP_MIN_ATR", "0.5"))       # §2 défaut 0,5
+        self.be_trigger = float(_get("BE_TRIGGER", "1.0"))           # (†) break-even en R (P4)
+        self.rr_mult = float(_get("RR_MULT", "1.5"))                 # §2 défaut 1,5 (rrMult vivant)
+        self.rr_grid = [float(x) for x in _get("RR_GRID", "1.0,1.5,2.0").split(",") if x.strip()]  # (†) « 3 rrMult » §3
+        self.min_amp_atr = float(_get("MIN_AMP_ATR", "1.0"))         # (†) amplitude minimale
+        self.atr_period = int(_get("ATR_PERIOD", "14"))              # (†) ATR standard de Wilder
+        self.analysis_timeframes = [s.strip() for s in
+                                    _get("ANALYSIS_TIMEFRAMES", "15m,30m,1h,4h,12h,1D").split(",") if s.strip()]
+        self.solide_min_n = int(_get("SOLIDE_MIN_N", "200"))         # §3 « solide » si n ≥ 200
+        self.risk_cap_pct = float(_get("RISK_CAP_PCT", "4.0"))       # §5.4 plafond risque ouvert
+        self.corr_high = float(_get("CORR_HIGH", "0.8"))             # §5.4 seuil ρ élevé
+
         self.heartbeat_seconds = int(_get("HEARTBEAT_SECONDS", "30"))
         self.primary_silence_seconds = int(_get("PRIMARY_SILENCE_SECONDS", "300"))
 

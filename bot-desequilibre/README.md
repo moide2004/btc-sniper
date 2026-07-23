@@ -1,14 +1,31 @@
-# Bot Déséquilibré — P1 (Données & socle, BTC + ETH)
+# Bot Déséquilibré — P1 + P2 (Socle données + moteur Fibonacci/probas, BTC + ETH)
 
 Analyste de trading multi-timeframes fondé sur les cassures de Fibonacci
-(**il signale, il n'exécute jamais**). **Phase 1 livrée** : socle de données
-dual-actif (cache 1m parquet segmenté par mois, SQLite WAL), source robuste
-(websocket combiné Binance BTC+ETH + backfill REST + bascule
-Kraken/Coinbase/CoinGecko), worker always-on idempotent + heartbeat, tâche
-quotidienne (ré-échantillonnage + sauvegarde + budget ressources), mini-app web
-de lecture (auth + bandeau d'âge par actif).
+(**il signale, il n'exécute jamais**).
+
+**Phase 1 livrée** : socle de données dual-actif (cache 1m parquet segmenté par
+mois, SQLite WAL), source robuste (websocket combiné Binance BTC+ETH + backfill
+REST + bascule Kraken/Coinbase/CoinGecko), worker always-on idempotent +
+heartbeat, tâche quotidienne, mini-app web de lecture.
+
+**Phase 2 livrée** : moteur §2 (détection de setups « déséquilibre » sur cassure
+Fibonacci, sur **toutes** les timeframes d'analyse 15m→1D, pas seulement le 1m
+qui n'est que le substrat) + couche probabiliste §3 (double barrière TP/SL
+mesurée sur le 1m, Wilson 95 %, Beta q25, EV nette taker+maker, réalisme, walk-
+forward). Émission de **tickets** annotés « solide »/« spéculatif » dès qu'un
+setup est valide ; recalcul des tables la nuit (00:10 UTC).
 
 > Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
+
+## ⚠️ Point à confirmer (§9.1) — orientation Fibonacci
+La géométrie du SL du BRIEF (« SL long **sous** 78,6 %, SL short **au-dessus** de
+23,6 % ») n'est cohérente **que** si les pourcentages sont mesurés **en
+retracement depuis le haut** : `level(p) = H − p·R` (0 %=haut, 100 %=bas), donc
+**23,6 % est proche du haut** et **78,6 % proche du bas**. C'est l'orientation
+implémentée (voir `core/indicators.py`). Un **long** est alors une cassure par le
+haut (nouveau plus-haut) et son stop est placé bas (78,6 %). Si ton intention
+était l'orientation inverse, dis-le : c'est un réglage isolé, sans toucher au
+reste. Aucune autre règle/paramètre n'a été ajouté.
 
 ---
 
@@ -127,3 +144,22 @@ recomble seul). Les caches parquet se reconstruisent via backfill.
 
 Banc local sans réseau : `python tests/test_p1.py` (17 tests) — démontre store,
 isolation dual-actif, append segmenté, continuité, reprise idempotente.
+
+## 7. Moteur §2/§3 (P2) — lecture
+
+- **Endpoints web** : `/api/probas` (matrice actif×TF×direction : p̂, Wilson,
+  p_prudent, EV taker/maker, k_max, CVaR99, walk-forward) et `/api/tickets`
+  (setups vivants annotés). Le rendu 4 vues complet arrive en **P3**.
+- **Recalcul manuel** des tables §3 (sinon automatique à 00:10 UTC) :
+  `python jobs/daily_update.py`.
+- **Tickets** : émis par le worker sur chaque bougie d'analyse close avec setup ;
+  visibles via `/api/tickets` et la cloche interne (événements `ticket`).
+- **Paramètres §2** (dans `.env`, défauts épinglés du BRIEF ; ceux sans défaut
+  explicite sont marqués (†) dans `core/config.py`, à confirmer §9.1) :
+  `FIB_LOOKBACK=50`, `RR_MULT=1.5`, `STOP_MAX_ATR=3`, `STOP_MIN_ATR=0.5`,
+  `SHORT_RISK_FACTOR=0.75`, `RISK_PCT=0.015`, `BUFFER_ATR`, `MIN_AMP_ATR`,
+  `RR_GRID=1.0,1.5,2.0`, `ATR_PERIOD`, `ANALYSIS_TIMEFRAMES=15m,30m,1h,4h,12h,1D`.
+
+Banc local sans réseau : `python tests/test_p2.py` (41 tests) — géométrie
+Fibonacci, détection §2, double barrière, Wilson/Beta/EV/réalisme, budget §5.4,
+store probas/tickets, orchestrateur (recalcul + scan live idempotent).

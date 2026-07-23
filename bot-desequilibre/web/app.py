@@ -145,8 +145,41 @@ def api_livre():
 @app.route("/api/probas")
 @login_required
 def api_probas():
-    return jsonify({"generated_at": utc_now_iso(), "cases": [],
-                    "note": "Matrice Fibonacci alimentée en P2."})
+    """Matrice §3 : dernier bloc de chaque (actif, TF, direction), résumé au
+    rrMult vivant + grille complète des rr en payload."""
+    rr_key = f"{CONFIG.rr_mult:.2f}"
+    with _read_store() as st:
+        rows = st.all_latest_probas()
+        corr = st.get_kv("corr_btc_eth")
+    cases = []
+    for r in rows:
+        pl = r["payload"]
+        blk = (pl.get("rr") or {}).get(rr_key, {})
+        cases.append({
+            "symbol": r["symbol"], "timeframe": r["timeframe"],
+            "direction": r["direction"], "ts_utc": r["ts_utc"],
+            "n_setups": pl.get("n_setups", 0),
+            "n": blk.get("n"), "k": blk.get("k"), "p_hat": blk.get("p_hat"),
+            "p_prudent": blk.get("p_prudent"), "wilson": blk.get("wilson"),
+            "ev_prudent_taker": blk.get("ev_prudent_taker"),
+            "ev_point_taker": blk.get("ev_point_taker"),
+            "ev_prudent_maker": blk.get("ev_prudent_maker"),
+            "k_max": blk.get("k_max"), "cvar99_r": blk.get("cvar99_r"),
+            "wf": (pl.get("walk_forward") or {}).get(rr_key, {}),
+            "rr_grid": pl.get("rr", {}),
+        })
+    return jsonify({"generated_at": utc_now_iso(), "rr_live": CONFIG.rr_mult,
+                    "corr_btc_eth": float(corr) if corr else None, "cases": cases,
+                    "note": "Chiffres MESURÉS (double barrière), pas des prédictions."})
+
+
+@app.route("/api/tickets")
+@login_required
+def api_tickets():
+    with _read_store() as st:
+        tickets = st.list_tickets(limit=100)
+    return jsonify({"generated_at": utc_now_iso(), "tickets": tickets,
+                    "note": "Aucun ordre réel. Analyste : il signale, il n'exécute jamais."})
 
 
 if __name__ == "__main__":
