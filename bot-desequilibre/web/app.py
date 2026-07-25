@@ -131,14 +131,25 @@ def api_evenements():
 @app.route("/api/livre")
 @login_required
 def api_livre():
+    import json as _json
     with _read_store() as st:
         age = st.heartbeat_age_seconds()
+        open_pos = st.list_open_positions()
+        open_risk = st.open_risk_usd()
+        bt_raw = st.get_kv("backtest")
+        journal = st.list_journal(limit=60)
+    positions = [{"id": p["id"], "opened_utc": p["opened_utc"], "symbol": p["symbol"],
+                  "timeframe": p["timeframe"], **{k: p["payload"].get(k) for k in
+                  ("direction", "entry", "sl", "tp", "risk_usd", "be_done", "rr")}}
+                 for p in open_pos]
+    backtest = _json.loads(bt_raw) if bt_raw else None
+    cap = CONFIG.capital_usd or 1.0
     return jsonify({
         "generated_at": utc_now_iso(),
         "worker_stale": (age is None) or (age > STALE_AFTER_S),
-        "risque_ouvert_pct": 0.0, "plafond_pct": CONFIG.risk_cap_pct,
-        "positions": [], "tickets_actifs": [], "tickets_bloques": [],
-        "note": "Positions alimentées en P4 (paper trading BTC+ETH).",
+        "capital_usd": CONFIG.capital_usd,
+        "risque_ouvert_pct": 100.0 * open_risk / cap, "plafond_pct": CONFIG.risk_cap_pct,
+        "positions": positions, "backtest": backtest, "journal": journal,
     })
 
 

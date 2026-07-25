@@ -239,6 +239,67 @@ class Store:
                 "DELETE FROM tickets WHERE ts_utc < datetime('now', ?)",
                 (f"-{int(days)} days",)).rowcount
 
+    # ----- Positions §8 P4 (paper trading — VIRTUEL) ----------------------
+    def open_position(self, symbol: str, timeframe: str, payload: dict) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO positions (opened_utc, symbol, timeframe, payload) "
+                "VALUES (?,?,?,?)",
+                (utc_now_iso(), symbol, timeframe, json.dumps(payload)))
+            return int(cur.lastrowid)
+
+    def update_position(self, pid: int, payload: dict) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE positions SET payload=? WHERE id=?",
+                              (json.dumps(payload), pid))
+
+    def close_position(self, pid: int, payload: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE positions SET closed_utc=?, payload=? WHERE id=?",
+                (utc_now_iso(), json.dumps(payload), pid))
+
+    def list_open_positions(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id, opened_utc, symbol, timeframe, payload FROM positions "
+            "WHERE closed_utc IS NULL ORDER BY id").fetchall()
+        return [{"id": r["id"], "opened_utc": r["opened_utc"], "symbol": r["symbol"],
+                 "timeframe": r["timeframe"], "payload": json.loads(r["payload"])}
+                for r in rows]
+
+    def list_positions(self, limit: int = 200, closed: Optional[bool] = None) -> list[dict[str, Any]]:
+        q = ("SELECT id, opened_utc, closed_utc, symbol, timeframe, payload "
+             "FROM positions")
+        if closed is True:
+            q += " WHERE closed_utc IS NOT NULL"
+        elif closed is False:
+            q += " WHERE closed_utc IS NULL"
+        q += " ORDER BY id DESC LIMIT ?"
+        rows = self.conn.execute(q, (limit,)).fetchall()
+        return [{"id": r["id"], "opened_utc": r["opened_utc"], "closed_utc": r["closed_utc"],
+                 "symbol": r["symbol"], "timeframe": r["timeframe"],
+                 "payload": json.loads(r["payload"])} for r in rows]
+
+    def open_risk_usd(self) -> float:
+        total = 0.0
+        for p in self.list_open_positions():
+            total += float(p["payload"].get("risk_usd", 0.0) or 0.0)
+        return total
+
+    def add_journal(self, symbol: str, timeframe: str, payload: dict) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO journal (ts_utc, symbol, timeframe, payload) VALUES (?,?,?,?)",
+                (utc_now_iso(), symbol, timeframe, json.dumps(payload)))
+            return int(cur.lastrowid)
+
+    def list_journal(self, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT id, ts_utc, symbol, timeframe, payload FROM journal "
+            "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [{"id": r["id"], "ts_utc": r["ts_utc"], "symbol": r["symbol"],
+                 "timeframe": r["timeframe"], **json.loads(r["payload"])} for r in rows]
+
     # ----- Santé / config -------------------------------------------------
     def record_health(self, cycle_kind: str, duration_s=None, cpu_s=None,
                       peak_mem_mb=None, clock_skew_s=None, note=None) -> None:

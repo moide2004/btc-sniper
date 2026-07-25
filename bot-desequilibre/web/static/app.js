@@ -138,12 +138,54 @@ async function refreshTickets(){
   }catch(e){}
 }
 
-// ---- Vue Livre (§5.4) ------------------------------------------------------
+// ---- Vue Livre (§5.4 + paper trading P4) -----------------------------------
 async function refreshLivre(){
   try{
     const d = await getJSON("/api/livre"); if(!d) return;
     document.getElementById("risk-open").textContent = num(d.risque_ouvert_pct,2)+" %";
     document.getElementById("risk-cap").textContent = num(d.plafond_pct,1)+" %";
+    const bt = d.backtest;
+    document.getElementById("equity").textContent = bt&&bt.portfolio ?
+      num(bt.portfolio.equity_usd,0)+" $ ("+signed(bt.portfolio.pnl_usd,0)+" $)" : "—";
+
+    // Positions ouvertes.
+    const pb=document.getElementById("pos-body"), pos=d.positions||[];
+    pb.innerHTML = pos.length ? pos.map(p=>
+      `<tr><td>${p.symbol} · ${p.timeframe} · <span class="${p.direction}">${p.direction}</span></td>
+       <td>${num(p.entry)}</td><td>${num(p.sl)}</td><td>${num(p.tp)}</td>
+       <td>${p.be_done?"✓":"—"}</td><td>${num(p.risk_usd,0)}</td></tr>`).join("")
+      : '<tr><td class="muted" colspan="6">Aucune position ouverte.</td></tr>';
+
+    // Backtest par flux + verdict.
+    const bb=document.getElementById("bt-body");
+    const fx = bt&&bt.fluxes ? bt.fluxes.slice().sort((a,b)=>
+      a.symbol.localeCompare(b.symbol) ||
+      TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
+      a.direction.localeCompare(b.direction)) : [];
+    if(!fx.length){ bb.innerHTML='<tr><td class="muted" colspan="11">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr>'; }
+    else{
+      bb.innerHTML = fx.map(f=>{
+        const v=f.verdict||{}, go=v.go, cls=v.statut==="go"?"good":v.statut==="insuffisant"?"muted":"bad";
+        return `<tr>
+          <td>${f.symbol} · ${f.timeframe} · <span class="${f.direction}">${f.direction}</span></td>
+          <td>${f.n}</td><td>${pct(f.winrate,0)}</td><td>${num(f.profit_factor)}</td>
+          <td class="${evClass(f.expectancy_r)}">${signed(f.expectancy_r,3)}</td>
+          <td class="${evClass(f.sum_r)}">${signed(f.sum_r,1)}</td>
+          <td>${num(f.t_stat)}</td><td>${num(f.max_dd_r,1)}</td>
+          <td>${num(f.mc_dd_p95_r,1)}</td>
+          <td class="${evClass(f.pnl_usd)}">${signed(f.pnl_usd,0)}</td>
+          <td class="${cls}">${go?"✓ go":v.statut||"—"}</td></tr>`;
+      }).join("");
+    }
+
+    // Journal.
+    const jl=document.getElementById("journal"), j=d.journal||[];
+    jl.innerHTML = j.length ? j.map(e=>{
+      const isC=e.event==="close";
+      return `<li><b>${e.ts_utc}</b> · ${e.symbol} ${e.timeframe}
+        <span class="${e.direction}">${(e.direction||"").toUpperCase()}</span> — ${e.event}
+        ${isC?`(${e.reason}, <span class="${evClass(e.r_net)}">${signed(e.r_net,2)} R</span>, ${signed(e.pnl_usd,0)}$)`:`@ ${num(e.entry)}`}</li>`;
+    }).join("") : '<li class="muted">Aucun trade encore.</li>';
   }catch(e){}
 }
 

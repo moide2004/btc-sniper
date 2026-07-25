@@ -1,4 +1,4 @@
-# Bot Déséquilibré — P1 + P2 + P3 (Socle · moteur Fibonacci/probas · mini-app, BTC + ETH)
+# Bot Déséquilibré — P1→P4 (Socle · Fibonacci/probas · mini-app · paper trading, BTC + ETH)
 
 Analyste de trading multi-timeframes fondé sur les cassures de Fibonacci
 (**il signale, il n'exécute jamais**).
@@ -20,6 +20,16 @@ setup est valide ; recalcul des tables la nuit (00:10 UTC).
 par actif×TF×direction : p̂, Wilson, p_prudent, EV, k_max, CVaR99, walk-forward,
 badge solide/spéculatif), **Tickets** (setups vivants), **Livre & budget** (§5.4,
 positions en P4). Live par polling ; ⚠ si worker en retard.
+
+**Phase 4 livrée** : paper trading **VIRTUEL** (aucun ordre réel) — même moteur de
+fill fidèle §2 (entrée à l'open suivant, **break-even** au beTrigger, double
+barrière pessimiste sur le 1m) utilisé de deux façons : (a) **replay historique
+par flux** chaque nuit → n, taux, **profit factor**, espérance R, **t-stat**,
+drawdown max, **drawdown Monte-Carlo p95**, et **verdict go/no-go** par flux
+(critères §8 P5) — résultats visibles immédiatement ; (b) **forward live** — le
+worker ouvre les tickets éligibles (fill réel + **budget de risque partagé §5.4**)
+et gère les positions bougie 1m par bougie, avec **journal**. La vue **Livre**
+affiche positions ouvertes, backtest par flux + verdict, et journal.
 
 > Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
 

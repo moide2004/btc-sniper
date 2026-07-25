@@ -23,7 +23,7 @@ from core.data_source import (  # noqa: E402
     BinanceMultiStream, DataSource, append_ohlcv, count_duplicates, find_gaps,
     last_open_time, load_ohlcv, MINUTE_MS,
 )
-from core.engine import live_scan  # noqa: E402
+from core.engine import live_scan, paper_step  # noqa: E402
 from core.logging_setup import get_logger  # noqa: E402
 from core.store import Store, utc_now_ms  # noqa: E402
 
@@ -170,6 +170,10 @@ class Worker:
                             log.info(f"Scan setups : {n} ticket(s) émis")
                     except Exception as e:
                         log.warning(f"Scan setups : {e!r}")
+                    try:                             # §8 P4 : paper trading forward
+                        paper_step(self.store, utc_now_ms(), log)
+                    except Exception as e:
+                        log.warning(f"Paper trading : {e!r}")
             except Exception as e:
                 log.error(f"Cycle worker en échec (poursuite) : {e!r}")
                 status = "degraded"
