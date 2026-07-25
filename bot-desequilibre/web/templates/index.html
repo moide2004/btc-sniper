@@ -136,13 +136,22 @@
     <div class="card">
       <div class="k" style="margin-bottom:6px">Bilan go/no-go par flux (§8 P5)</div>
       <div id="bilan" class="muted" style="margin-bottom:8px">—</div>
+      <div class="jp-form" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:8px">
+        <label class="k">Capital simulé ($)
+          <input id="sim-cap" type="number" step="any" min="1" placeholder="ex : 10000"></label>
+        <label class="k">Risque par trade (%)
+          <input id="sim-risk" type="number" step="any" min="0.01" max="100" placeholder="ex : 2"></label>
+        <span class="muted" style="align-self:end">Les colonnes <b>PnL $</b> et <b>% capital</b> se
+          recalculent instantanément pour CE capital et CE risque (short ×<span id="sim-srf">0,75</span>).</span>
+      </div>
       <p class="muted" style="margin-top:0">Rejeu de tout l'historique (BE, double barrière). <b class="good">go</b> =
         <b>n</b>≥200 ∧ <b>PF</b>&gt;1,15 ∧ <b>t</b>≥1,5 ∧ <b>DD</b> MC p95×1,25&lt;30 % ∧
         <b>dégr.</b> progressive ∧ <b>rétention</b>≥0,5. Survolez le verdict pour le détail des critères.</p>
       <div class="scroll"><table id="bttab"><thead><tr>
         <th>Actif · TF · sens</th><th>n</th><th>taux</th><th>PF</th><th>espérance R</th>
-        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th><th>PnL $</th><th>verdict</th>
-      </tr></thead><tbody id="bt-body"><tr><td class="muted" colspan="12">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr></tbody></table></div>
+        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th>
+        <th>PnL $</th><th>% capital</th><th>verdict</th>
+      </tr></thead><tbody id="bt-body"><tr><td class="muted" colspan="13">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr></tbody></table></div>
     </div>
 
     <div class="card">
@@ -182,6 +191,6 @@
     </div>
   </section>
 
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

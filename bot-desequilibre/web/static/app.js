@@ -139,14 +139,52 @@ async function refreshTickets(){
 }
 
 // ---- Vue Livre (§5.4 + paper trading P4) -----------------------------------
+// Simulateur : PnL par flux = Σ R × capital × risque% (× facteur short).
+let livreData = null;
+function simParams(){
+  const p = (livreData&&livreData.params)||{};
+  const cap = parseFloat(document.getElementById("sim-cap").value);
+  const rk = parseFloat(document.getElementById("sim-risk").value);
+  return {
+    cap: (isFinite(cap)&&cap>0) ? cap : (p.capital_usd||3000),
+    riskFrac: (isFinite(rk)&&rk>0) ? rk/100 : (p.risk_pct||0.015),
+    srf: p.short_risk_factor!=null ? p.short_risk_factor : 0.75,
+  };
+}
+function fluxPnl(f, sp){
+  if(f.sum_r==null) return null;
+  const factor = f.direction==="short" ? sp.srf : 1.0;
+  return f.sum_r * sp.cap * sp.riskFrac * factor;
+}
+
 async function refreshLivre(){
   try{
     const d = await getJSON("/api/livre"); if(!d) return;
+    livreData = d;
+    const p = d.params||{};
+    const srfEl=document.getElementById("sim-srf");
+    if(srfEl) srfEl.textContent = num(p.short_risk_factor,2);
+    // Pré-remplir les cases une seule fois avec les valeurs du serveur.
+    const capEl=document.getElementById("sim-cap"), rkEl=document.getElementById("sim-risk");
+    if(capEl && capEl.value==="" && !capEl.dataset.touched) capEl.placeholder = p.capital_usd||3000;
+    if(rkEl && rkEl.value==="" && !rkEl.dataset.touched) rkEl.placeholder = 100*(p.risk_pct||0.015);
+    renderLivre();
+  }catch(e){}
+}
+
+function renderLivre(){
+    const d = livreData; if(!d) return;
     document.getElementById("risk-open").textContent = num(d.risque_ouvert_pct,2)+" %";
     document.getElementById("risk-cap").textContent = num(d.plafond_pct,1)+" %";
     const bt = d.backtest;
-    document.getElementById("equity").textContent = bt&&bt.portfolio ?
-      num(bt.portfolio.equity_usd,0)+" $ ("+signed(bt.portfolio.pnl_usd,0)+" $)" : "—";
+    const sp = simParams();
+    let totalPnl = null;
+    if(bt&&bt.fluxes){
+      totalPnl = 0;
+      for(const f of bt.fluxes){ const v=fluxPnl(f,sp); if(v!=null) totalPnl+=v; }
+    }
+    document.getElementById("equity").textContent = totalPnl!=null ?
+      num(sp.cap+totalPnl,0)+" $ ("+signed(totalPnl,0)+" $ sur capital "+num(sp.cap,0)+" $)" : "—";
 
     // Positions ouvertes.
     const pb=document.getElementById("pos-body"), pos=d.positions||[];
@@ -170,7 +208,7 @@ async function refreshLivre(){
       a.symbol.localeCompare(b.symbol) ||
       TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
       a.direction.localeCompare(b.direction)) : [];
-    if(!fx.length){ bb.innerHTML='<tr><td class="muted" colspan="12">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr>'; }
+    if(!fx.length){ bb.innerHTML='<tr><td class="muted" colspan="13">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr>'; }
     else{
       const ok=b=>b?"✓":"✗";
       bb.innerHTML = fx.map(f=>{
@@ -178,6 +216,8 @@ async function refreshLivre(){
         const tip=`n ${ok(v.n_ok)} · PF ${ok(v.pf_ok)} · t ${ok(v.t_ok)} · DD ${ok(v.dd_ok)}`+
           ` · dégr. ${ok(v.degr_ok)} · rétention ${ok(v.ret_ok)}`+
           (v.dd_capital_pct!=null?` · DD cap. ${num(v.dd_capital_pct,1)}%`:"");
+        const pnl = fluxPnl(f, sp);
+        const pnlPct = pnl==null ? null : 100*pnl/sp.cap;
         return `<tr>
           <td>${f.symbol} · ${f.timeframe} · <span class="${f.direction}">${f.direction}</span></td>
           <td>${f.n}</td><td>${pct(f.winrate,0)}</td><td>${num(f.profit_factor)}</td>
@@ -186,7 +226,8 @@ async function refreshLivre(){
           <td>${num(f.t_stat)}</td><td>${num(f.max_dd_r,1)}</td>
           <td>${num(f.mc_dd_p95_r,1)}</td>
           <td class="${f.retention!=null&&f.retention>=0.5?'good':f.retention!=null?'bad':''}">${num(f.retention,2)}</td>
-          <td class="${evClass(f.pnl_usd)}">${signed(f.pnl_usd,0)}</td>
+          <td class="${evClass(pnl)}"><b>${pnl==null?"—":signed(pnl,0)}</b></td>
+          <td class="${evClass(pnlPct)}">${pnlPct==null?"—":signed(pnlPct,1)+" %"}</td>
           <td class="${cls}" title="${tip}">${go?"✓ go":v.statut||"—"}</td></tr>`;
       }).join("");
     }
@@ -199,7 +240,12 @@ async function refreshLivre(){
         <span class="${e.direction}">${(e.direction||"").toUpperCase()}</span> — ${e.event}
         ${isC?`(${e.reason}, <span class="${evClass(e.r_net)}">${signed(e.r_net,2)} R</span>, ${signed(e.pnl_usd,0)}$)`:`@ ${num(e.entry)}`}</li>`;
     }).join("") : '<li class="muted">Aucun trade encore.</li>';
-  }catch(e){}
+}
+
+// Recalcul instantané quand on change capital ou risque.
+for(const id of ["sim-cap","sim-risk"]){
+  const el=document.getElementById(id);
+  if(el) el.addEventListener("input", ()=>{ el.dataset.touched="1"; renderLivre(); });
 }
 
 // ---- Vue Mon journal (saisie manuelle) -------------------------------------

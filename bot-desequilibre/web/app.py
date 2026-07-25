@@ -149,6 +149,9 @@ def api_livre():
         "worker_stale": (age is None) or (age > STALE_AFTER_S),
         "capital_usd": CONFIG.capital_usd,
         "risque_ouvert_pct": 100.0 * open_risk / cap, "plafond_pct": CONFIG.risk_cap_pct,
+        "params": {"capital_usd": CONFIG.capital_usd,
+                   "risk_pct": CONFIG.risk_pct,
+                   "short_risk_factor": CONFIG.short_risk_factor},
         "positions": positions, "backtest": backtest, "journal": journal,
     })
 
