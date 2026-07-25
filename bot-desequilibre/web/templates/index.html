@@ -184,8 +184,10 @@
           <option value="short">short</option></select>
         <input id="jp-entry" type="number" step="any" placeholder="Entrée">
         <input id="jp-sl" type="number" step="any" placeholder="SL">
-        <input id="jp-tp" type="number" step="any" placeholder="TP (optionnel)">
-        <input id="jp-size" type="number" step="any" placeholder="Taille (unités, opt.)">
+        <input id="jp-tp" type="number" step="any" placeholder="TP (opt. si ratio)">
+        <input id="jp-ratio" type="number" step="any" placeholder="Ratio (ex : 3 → TP auto)">
+        <input id="jp-cap" type="number" step="any" placeholder="Capital $ (ex : 10000)">
+        <input id="jp-risk" type="number" step="any" placeholder="Risque % (ex : 1)">
         <input id="jp-note" placeholder="Note (setup, raison, émotion…)" style="grid-column:1/-1">
         <button id="jp-add" class="btn">Ajouter le trade</button>
         <span id="jp-msg" class="muted"></span>
@@ -195,13 +197,14 @@
       <div class="k" style="margin-bottom:6px">Mes trades</div>
       <div class="scroll"><table><thead><tr>
         <th>Date (UTC)</th><th>Actif · TF · sens</th><th>Entrée</th><th>SL</th><th>TP</th>
-        <th>Sortie</th><th>R</th><th>PnL $</th><th>Note</th><th></th>
-      </tr></thead><tbody id="jp-body"><tr><td class="muted" colspan="10">Aucun trade saisi.</td></tr></tbody></table></div>
-      <p class="muted">À la clôture, le <b>R</b> est calculé par rapport à ton stop
-        (|sortie−entrée| / |entrée−SL|) et le PnL si la taille est renseignée.</p>
+        <th>Ratio</th><th>Risque $</th><th>Sortie</th><th>R</th><th>PnL $</th><th>Note</th><th></th>
+      </tr></thead><tbody id="jp-body"><tr><td class="muted" colspan="12">Aucun trade saisi.</td></tr></tbody></table></div>
+      <p class="muted">Automatique : <b>TP</b> = entrée ± ratio×|entrée−SL| si tu donnes le ratio ·
+        <b>Risque $</b> = capital × risque% · à la clôture <b>R</b> = |sortie−entrée| / |entrée−SL|
+        (sens respecté) et <b>PnL = R × risque $</b>.</p>
     </div>
   </section>
 
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

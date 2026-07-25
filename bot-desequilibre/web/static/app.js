@@ -307,19 +307,32 @@ async function postJSON(url, body){
   }
 }
 
+function jpRatio(t){
+  if(t.tp==null||t.entry==null||t.sl==null) return null;
+  const stop=Math.abs(t.entry-t.sl);
+  return stop>0 ? Math.abs(t.tp-t.entry)/stop : null;
+}
+function jpRisk(t){
+  if(t.capital_usd&&t.risk_pct) return t.capital_usd*t.risk_pct/100.0;
+  if(t.size_units&&t.entry!=null&&t.sl!=null) return t.size_units*Math.abs(t.entry-t.sl);
+  return null;
+}
+
 async function refreshJournalPerso(){
   try{
     const d = await getJSON("/api/journal-perso"); if(!d) return;
     const rows=d.trades||[];
     document.getElementById("b-jp").textContent = rows.filter(t=>!t.closed_utc).length;
     const body=document.getElementById("jp-body");
-    if(!rows.length){ body.innerHTML='<tr><td class="muted" colspan="10">Aucun trade saisi.</td></tr>'; return; }
+    if(!rows.length){ body.innerHTML='<tr><td class="muted" colspan="12">Aucun trade saisi.</td></tr>'; return; }
     body.innerHTML = rows.map(t=>{
-      const open=!t.closed_utc;
+      const open=!t.closed_utc, ratio=jpRatio(t), risk=jpRisk(t);
       return `<tr>
         <td>${esc((t.ts_utc||"").replace("T"," ").slice(0,16))}</td>
         <td>${esc(t.symbol)}${t.timeframe?" · "+esc(t.timeframe):""}${t.direction?` · <span class="${esc(t.direction)}">${esc(t.direction)}</span>`:""}</td>
         <td>${num(t.entry)}</td><td>${num(t.sl)}</td><td>${num(t.tp)}</td>
+        <td>${ratio==null?"—":"1:"+num(ratio,1)}</td>
+        <td>${risk==null?"—":num(risk,0)}</td>
         <td>${open?'<span class="muted">ouvert</span>':num(t.exit_price)}</td>
         <td class="${evClass(t.r_result)}">${t.r_result==null?"—":signed(t.r_result,2)}</td>
         <td class="${evClass(t.pnl_usd)}">${t.pnl_usd==null?"—":signed(t.pnl_usd,0)}</td>
@@ -338,13 +351,21 @@ async function jpAdd(){
   msg.textContent="envoi…";
   const res=await postJSON("/api/journal-perso",{symbol:v("jp-sym"),timeframe:v("jp-tf"),
     direction:v("jp-dir"),entry:v("jp-entry"),sl:v("jp-sl"),tp:v("jp-tp"),
-    size_units:v("jp-size"),note:v("jp-note")});
+    ratio:v("jp-ratio"),capital_usd:v("jp-cap"),risk_pct:v("jp-risk"),note:v("jp-note")});
   if(!res) return;
   if(!res.ok){ msg.textContent="⚠ "+(res.error||"erreur"); return; }
-  msg.textContent="✓ ajouté";
-  ["jp-entry","jp-sl","jp-tp","jp-size","jp-note"].forEach(i=>document.getElementById(i).value="");
+  msg.textContent = "✓ ajouté" + (res.tp!=null && v("jp-tp")==="" ? " (TP auto : "+num(res.tp)+")" : "");
+  // Capital et risque sont mémorisés pour les prochains trades.
+  try{ localStorage.setItem("jp-cap", v("jp-cap")); localStorage.setItem("jp-risk", v("jp-risk")); }catch(_){}
+  ["jp-entry","jp-sl","jp-tp","jp-ratio","jp-note"].forEach(i=>document.getElementById(i).value="");
   refreshJournalPerso();
 }
+// Restaurer capital/risque mémorisés.
+try{
+  const c=localStorage.getItem("jp-cap"), r=localStorage.getItem("jp-risk");
+  if(c) document.getElementById("jp-cap").value=c;
+  if(r) document.getElementById("jp-risk").value=r;
+}catch(_){}
 async function jpClose(id){
   const p=prompt("Prix de sortie ?"); if(p==null||p==="") return;
   const res=await postJSON(`/api/journal-perso/${id}/cloture`,{exit_price:p});

@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS journal_perso (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts_utc TEXT NOT NULL,
     closed_utc TEXT, symbol TEXT NOT NULL, timeframe TEXT, direction TEXT,
     entry REAL, sl REAL, tp REAL, size_units REAL, exit_price REAL,
-    r_result REAL, pnl_usd REAL, note TEXT
+    r_result REAL, pnl_usd REAL, note TEXT,
+    capital_usd REAL, risk_pct REAL
 );
 """
 
@@ -103,6 +104,13 @@ class Store:
         if not read_only:
             with self.conn:
                 self.conn.executescript(_SCHEMA)
+            # Migration douce : colonnes ajoutées après coup (bases existantes).
+            for col in ("capital_usd REAL", "risk_pct REAL"):
+                try:
+                    with self.conn:
+                        self.conn.execute(f"ALTER TABLE journal_perso ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass                        # colonne déjà présente
 
     def close(self) -> None:
         try:
@@ -317,17 +325,22 @@ class Store:
     def add_journal_perso(self, symbol: str, timeframe: Optional[str],
                           direction: Optional[str], entry: Optional[float],
                           sl: Optional[float], tp: Optional[float],
-                          size_units: Optional[float], note: Optional[str]) -> int:
+                          size_units: Optional[float], note: Optional[str],
+                          capital_usd: Optional[float] = None,
+                          risk_pct: Optional[float] = None) -> int:
         with self.conn:
             cur = self.conn.execute(
                 """INSERT INTO journal_perso (ts_utc, symbol, timeframe, direction,
-                   entry, sl, tp, size_units, note) VALUES (?,?,?,?,?,?,?,?,?)""",
+                   entry, sl, tp, size_units, note, capital_usd, risk_pct)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (utc_now_iso(), symbol, timeframe, direction, entry, sl, tp,
-                 size_units, note))
+                 size_units, note, capital_usd, risk_pct))
             return int(cur.lastrowid)
 
     def close_journal_perso(self, jid: int, exit_price: float) -> Optional[dict[str, Any]]:
-        """Clôture une ligne : calcule R (par rapport au stop) et PnL si possible."""
+        """Clôture une ligne : R = |sortie−entrée| / |entrée−SL| (sens respecté).
+        PnL prioritairement en MODE COMPTE : R × capital × risque% (mise fixe en
+        % du capital) ; sinon repli sur la taille en unités si renseignée."""
         row = self.conn.execute("SELECT * FROM journal_perso WHERE id=?", (jid,)).fetchone()
         if not row or row["closed_utc"]:
             return None
@@ -338,7 +351,10 @@ class Store:
             if stop_dist > 0:
                 r_result = (exit_price - e) / stop_dist if d == "long" \
                     else (e - exit_price) / stop_dist
-                if row["size_units"]:
+                cap, rp = row["capital_usd"], row["risk_pct"]
+                if cap and rp:
+                    pnl = r_result * cap * rp / 100.0
+                elif row["size_units"]:
                     pnl = r_result * row["size_units"] * stop_dist
         with self.conn:
             self.conn.execute(

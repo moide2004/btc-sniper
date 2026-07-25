@@ -182,14 +182,25 @@ def api_journal_perso():
     direction = str(d.get("direction") or "").strip().lower()
     if direction not in ("long", "short", ""):
         return jsonify({"error": "sens invalide"}), 400
+    entry = _f_or_none(d.get("entry"))
+    sl = _f_or_none(d.get("sl"))
+    tp = _f_or_none(d.get("tp"))
+    ratio = _f_or_none(d.get("ratio"))
+    # TP AUTO : si pas de TP mais un ratio (ex. 3 → 1:3), TP = entrée ± ratio×stop.
+    if tp is None and ratio and ratio > 0 and entry is not None and sl is not None \
+            and direction in ("long", "short"):
+        stop = abs(entry - sl)
+        if stop > 0:
+            tp = entry + ratio * stop if direction == "long" else entry - ratio * stop
     with _write_store() as st:
         jid = st.add_journal_perso(
             symbol=symbol, timeframe=str(d.get("timeframe") or "").strip()[:8] or None,
-            direction=direction or None, entry=_f_or_none(d.get("entry")),
-            sl=_f_or_none(d.get("sl")), tp=_f_or_none(d.get("tp")),
+            direction=direction or None, entry=entry, sl=sl, tp=tp,
             size_units=_f_or_none(d.get("size_units")),
-            note=str(d.get("note") or "").strip()[:500] or None)
-    return jsonify({"ok": True, "id": jid})
+            note=str(d.get("note") or "").strip()[:500] or None,
+            capital_usd=_f_or_none(d.get("capital_usd")),
+            risk_pct=_f_or_none(d.get("risk_pct")))
+    return jsonify({"ok": True, "id": jid, "tp": tp})
 
 
 @app.route("/api/journal-perso/<int:jid>/cloture", methods=["POST"])
