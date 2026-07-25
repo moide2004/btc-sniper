@@ -1,4 +1,4 @@
-# Bot Déséquilibré — P1→P4 (Socle · Fibonacci/probas · mini-app · paper trading, BTC + ETH)
+# Bot Déséquilibré — P1→P5 complet (Socle · Fibonacci/probas · mini-app · paper trading · bilan, BTC + ETH)
 
 Analyste de trading multi-timeframes fondé sur les cassures de Fibonacci
 (**il signale, il n'exécute jamais**).
@@ -30,6 +30,15 @@ drawdown max, **drawdown Monte-Carlo p95**, et **verdict go/no-go** par flux
 worker ouvre les tickets éligibles (fill réel + **budget de risque partagé §5.4**)
 et gère les positions bougie 1m par bougie, avec **journal**. La vue **Livre**
 affiche positions ouvertes, backtest par flux + verdict, et journal.
+
+**Phase 5 livrée** : **bilan go/no-go PAR FLUX** (§8), 5 critères cumulatifs —
+n ≥ 200 · **PF > 1,15** · **t ≥ 1,5** · **DD Monte-Carlo p95 × 1,25 < 30 %** du
+capital · **dégradation progressive** (walk-forward non overfit) **ET rétention
+EV_test/EV_train ≥ 0,5** (jointe depuis la table §3 au rrMult vivant). Jamais un
+« go » sans preuve : rétention absente → no-go. Bilan récapitulatif (x go / y
+no-go / z insuffisants) recalculé chaque nuit ; détail des critères en infobulle
+sur chaque verdict. Un flux « no-go » est un résultat de recherche, pas un échec
+du logiciel. **Exécution réelle HORS PÉRIMÈTRE.**
 
 > Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
 

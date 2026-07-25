@@ -146,7 +146,12 @@ def recompute_backtest(store: Store, logger=None) -> dict:
                 summ["mc_dd_p95_r"] = mc_drawdown_p95([t.r_net for t in trades])
                 summ.update({"symbol": sym, "timeframe": tf, "direction": direction,
                              "n_setups": len(flux_setups)})
-                summ["verdict"] = _p5_verdict(summ)
+                # Rétention + statut walk-forward viennent de la table §3 (rr vivant).
+                pb = store.latest_proba(sym, tf, direction) or {}
+                wf = pb.get("walk_forward", {}).get(f"{rr:.2f}", {})
+                summ["retention"] = wf.get("retention")
+                summ["wf_status"] = wf.get("status")
+                summ["verdict"] = _p5_verdict(summ, wf.get("retention"), wf.get("status"))
                 fluxes.append(summ)
                 all_trades.extend(trades)
                 if logger:
@@ -156,31 +161,44 @@ def recompute_backtest(store: Store, logger=None) -> dict:
     all_trades.sort(key=lambda t: (t.exit_time_ms or t.entry_time_ms))
     port = flux_summary(all_trades)
     equity_usd = CONFIG.capital_usd + port["pnl_usd"]
+    bilan = {"go": 0, "no-go": 0, "insuffisant": 0}
+    for f in fluxes:
+        bilan[f["verdict"]["statut"]] = bilan.get(f["verdict"]["statut"], 0) + 1
     result = {"generated_at": utc_now_iso(), "capital_usd": CONFIG.capital_usd,
-              "rr": rr, "fluxes": fluxes,
+              "rr": rr, "fluxes": fluxes, "bilan": bilan,
               "portfolio": {**port, "equity_usd": equity_usd}}
     store.set_kv("backtest", json.dumps(result))
-    return {"n_fluxes": len(fluxes), "n_trades": len(all_trades)}
+    return {"n_fluxes": len(fluxes), "n_trades": len(all_trades), "bilan": bilan}
 
 
-def _p5_verdict(summ: dict) -> dict:
-    """Critère go/no-go P5 PAR FLUX (§8) : PF net > 1,15 ET t ≥ 1,5 ET
-    DD MC p95×1,25 < 30 % (du capital, converti depuis R) ET rétention ≥ 0,5.
-    La rétention walk-forward vient de la table §3 (jointe à l'affichage)."""
+def _p5_verdict(summ: dict, retention: Optional[float] = None,
+                wf_status: Optional[str] = None) -> dict:
+    """Critère go/no-go P5 PAR FLUX (§8), 5 conditions cumulatives :
+      1) n ≥ solide_min_n (sinon « insuffisant », on ne juge pas) ;
+      2) PF net > 1,15 ;
+      3) t ≥ 1,5 ;
+      4) DD Monte-Carlo p95 × 1,25 < 30 % du capital (1 R = risk_pct du capital) ;
+      5) DÉGRADATION PROGRESSIVE (walk-forward non « overfit »/« disqualifié »)
+         ET RÉTENTION EV_test/EV_train ≥ 0,5 (§3).
+    Un flux peut échouer et être désactivé — c'est un résultat de recherche."""
     n = summ.get("n", 0)
-    if n < CONFIG.solide_min_n:
-        return {"statut": "insuffisant", "raison": f"n<{CONFIG.solide_min_n}", "go": False}
     pf, t = summ.get("profit_factor"), summ.get("t_stat")
     mc = summ.get("mc_dd_p95_r")
-    # DD en % du capital : R × risk_pct (1 R = risk_pct du capital).
     dd_pct = None if mc is None else mc * CONFIG.risk_pct * 1.25 * 100.0
+    crit_n = n >= CONFIG.solide_min_n
     crit_pf = pf is not None and pf > 1.15
     crit_t = t is not None and t >= 1.5
     crit_dd = dd_pct is not None and dd_pct < 30.0
-    go = bool(crit_pf and crit_t and crit_dd)
-    return {"statut": "go" if go else "no-go", "go": go,
-            "pf_ok": crit_pf, "t_ok": crit_t, "dd_ok": crit_dd,
-            "dd_capital_pct": dd_pct}
+    crit_ret = retention is not None and retention >= 0.5
+    crit_degr = wf_status not in (None, "overfit", "disqualifie", "insuffisant")
+    crits = {"n_ok": crit_n, "pf_ok": crit_pf, "t_ok": crit_t, "dd_ok": crit_dd,
+             "ret_ok": crit_ret, "degr_ok": crit_degr,
+             "dd_capital_pct": dd_pct, "retention": retention, "wf_status": wf_status}
+    if not crit_n:
+        return {"statut": "insuffisant", "go": False,
+                "raison": f"n<{CONFIG.solide_min_n}", **crits}
+    go = bool(crit_pf and crit_t and crit_dd and crit_ret and crit_degr)
+    return {"statut": "go" if go else "no-go", "go": go, **crits}
 
 
 # ===========================================================================

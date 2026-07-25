@@ -45,9 +45,12 @@ Capital unique. 2e position de MÊME direction (tous actifs/TF) comptée 1,5× ;
 **interdiction des positions opposées** entre actifs corrélés.
 
 ## Phases (ordre strict — §8)
-P0 géoblocage (ping) · P1 données & socle ✓ · P2 Fibonacci + probas ✓ · P3
-mini-app 4 vues ✓ · **P4 paper trading** (← livré : replay historique par flux +
-forward live, verdict go/no-go déjà calculé) · P5 bilan formel go/no-go
+P0 géoblocage ✓ · P1 données & socle ✓ · P2 Fibonacci + probas ✓ · P3 mini-app
+4 vues ✓ · P4 paper trading ✓ (replay historique par flux + forward live) ·
+**P5 bilan go/no-go ✓** : verdict PAR FLUX à 5 critères cumulatifs (n ≥ 200 ·
+PF > 1,15 · t ≥ 1,5 · DD MC p95×1,25 < 30 % · dégradation progressive ET
+rétention ≥ 0,5), recalculé chaque nuit, affiché avec bilan récapitulatif.
+Un flux « no-go » est un résultat de recherche. Exécution réelle HORS PÉRIMÈTRE.
 **par flux** (PF net > 1,15 ET t ≥ 1,5 ET DD MC p95×1,25 < 30 % ET dégradation
 progressive ET rétention ≥ 0,5). Un flux peut échouer et être désactivé — résultat
 de recherche. Exécution réelle HORS PÉRIMÈTRE.

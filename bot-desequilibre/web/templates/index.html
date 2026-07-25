@@ -126,13 +126,15 @@
     </div>
 
     <div class="card">
-      <div class="k" style="margin-bottom:6px">Backtest par flux — bilan go/no-go (§8 P5)</div>
-      <p class="muted" style="margin-top:0">Rejeu de tout l'historique en paper trading (BE, double barrière).
-        <b class="good">go</b> = PF&nbsp;&gt;&nbsp;1,15 ∧ t&nbsp;≥&nbsp;1,5 ∧ DD MC p95×1,25&nbsp;&lt;&nbsp;30 % ∧ n&nbsp;≥&nbsp;200.</p>
+      <div class="k" style="margin-bottom:6px">Bilan go/no-go par flux (§8 P5)</div>
+      <div id="bilan" class="muted" style="margin-bottom:8px">—</div>
+      <p class="muted" style="margin-top:0">Rejeu de tout l'historique (BE, double barrière). <b class="good">go</b> =
+        <b>n</b>≥200 ∧ <b>PF</b>&gt;1,15 ∧ <b>t</b>≥1,5 ∧ <b>DD</b> MC p95×1,25&lt;30 % ∧
+        <b>dégr.</b> progressive ∧ <b>rétention</b>≥0,5. Survolez le verdict pour le détail des critères.</p>
       <div class="scroll"><table id="bttab"><thead><tr>
         <th>Actif · TF · sens</th><th>n</th><th>taux</th><th>PF</th><th>espérance R</th>
-        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>PnL $</th><th>verdict</th>
-      </tr></thead><tbody id="bt-body"><tr><td class="muted" colspan="11">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr></tbody></table></div>
+        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th><th>PnL $</th><th>verdict</th>
+      </tr></thead><tbody id="bt-body"><tr><td class="muted" colspan="12">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr></tbody></table></div>
     </div>
 
     <div class="card">

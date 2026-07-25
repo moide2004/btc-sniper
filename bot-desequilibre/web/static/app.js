@@ -156,16 +156,28 @@ async function refreshLivre(){
        <td>${p.be_done?"✓":"—"}</td><td>${num(p.risk_usd,0)}</td></tr>`).join("")
       : '<tr><td class="muted" colspan="6">Aucune position ouverte.</td></tr>';
 
-    // Backtest par flux + verdict.
+    // Bilan récapitulatif P5.
+    const bl=bt&&bt.bilan;
+    document.getElementById("bilan").innerHTML = bl ?
+      `<span class="pill solide">${bl["go"]||0} go</span>
+       <span class="pill spec" style="margin-left:6px">${bl["no-go"]||0} no-go</span>
+       <span class="pill" style="margin-left:6px;background:#2a2f3a;color:var(--dim)">${bl["insuffisant"]||0} insuffisants</span>
+       <span class="muted" style="margin-left:10px">recalculé ${bt.generated_at||""}</span>` : "—";
+
+    // Backtest par flux + verdict (5 critères en infobulle).
     const bb=document.getElementById("bt-body");
     const fx = bt&&bt.fluxes ? bt.fluxes.slice().sort((a,b)=>
       a.symbol.localeCompare(b.symbol) ||
       TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
       a.direction.localeCompare(b.direction)) : [];
-    if(!fx.length){ bb.innerHTML='<tr><td class="muted" colspan="11">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr>'; }
+    if(!fx.length){ bb.innerHTML='<tr><td class="muted" colspan="12">Backtest calculé à la tâche quotidienne (00:10 UTC).</td></tr>'; }
     else{
+      const ok=b=>b?"✓":"✗";
       bb.innerHTML = fx.map(f=>{
         const v=f.verdict||{}, go=v.go, cls=v.statut==="go"?"good":v.statut==="insuffisant"?"muted":"bad";
+        const tip=`n ${ok(v.n_ok)} · PF ${ok(v.pf_ok)} · t ${ok(v.t_ok)} · DD ${ok(v.dd_ok)}`+
+          ` · dégr. ${ok(v.degr_ok)} · rétention ${ok(v.ret_ok)}`+
+          (v.dd_capital_pct!=null?` · DD cap. ${num(v.dd_capital_pct,1)}%`:"");
         return `<tr>
           <td>${f.symbol} · ${f.timeframe} · <span class="${f.direction}">${f.direction}</span></td>
           <td>${f.n}</td><td>${pct(f.winrate,0)}</td><td>${num(f.profit_factor)}</td>
@@ -173,8 +185,9 @@ async function refreshLivre(){
           <td class="${evClass(f.sum_r)}">${signed(f.sum_r,1)}</td>
           <td>${num(f.t_stat)}</td><td>${num(f.max_dd_r,1)}</td>
           <td>${num(f.mc_dd_p95_r,1)}</td>
+          <td class="${f.retention!=null&&f.retention>=0.5?'good':f.retention!=null?'bad':''}">${num(f.retention,2)}</td>
           <td class="${evClass(f.pnl_usd)}">${signed(f.pnl_usd,0)}</td>
-          <td class="${cls}">${go?"✓ go":v.statut||"—"}</td></tr>`;
+          <td class="${cls}" title="${tip}">${go?"✓ go":v.statut||"—"}</td></tr>`;
       }).join("");
     }
 
