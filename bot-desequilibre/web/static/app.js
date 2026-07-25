@@ -240,12 +240,55 @@ function renderLivre(){
         <span class="${e.direction}">${(e.direction||"").toUpperCase()}</span> — ${e.event}
         ${isC?`(${e.reason}, <span class="${evClass(e.r_net)}">${signed(e.r_net,2)} R</span>, ${signed(e.pnl_usd,0)}$)`:`@ ${num(e.entry)}`}</li>`;
     }).join("") : '<li class="muted">Aucun trade encore.</li>';
+
+    renderSim();
 }
 
-// Recalcul instantané quand on change capital ou risque.
-for(const id of ["sim-cap","sim-risk"]){
+// ---- Simulateur « un flux, une réponse » ------------------------------------
+function renderSim(){
+  const res=document.getElementById("sim-res"), det=document.getElementById("sim-det");
+  if(!res) return;
+  const bt = livreData && livreData.backtest;
+  if(!bt || !bt.fluxes || !bt.fluxes.length){
+    res.textContent="—"; res.className="";
+    det.textContent="Backtest pas encore calculé (tâche quotidienne 00:10 UTC).";
+    return;
+  }
+  const sym=document.getElementById("sim-sym").value,
+        tf=document.getElementById("sim-tf").value,
+        dir=document.getElementById("sim-dir").value;
+  const sp=simParams();
+  const f=bt.fluxes.find(x=>x.symbol===sym&&x.timeframe===tf&&x.direction===dir);
+  if(!f || !f.n){
+    res.textContent="Aucun trade mesuré sur ce flux";
+    res.className="";
+    det.textContent="La stratégie n'a produit aucun setup résolu sur "+sym+" "+tf+" "+dir+" en 2 ans.";
+    return;
+  }
+  const pnl=fluxPnl(f,sp), pctCap=100*pnl/sp.cap;
+  const gain=pnl>=0;
+  res.innerHTML=(gain?"GAIN de ":"PERTE de ")+
+    `<span class="${gain?'good':'bad'}">${Math.abs(pnl).toLocaleString("fr-FR",{maximumFractionDigits:0})} $`+
+    ` (${signed(pctCap,1)} %)</span> sur ~2 ans`;
+  res.className="";
+  const v=f.verdict||{};
+  const warn = v.statut==="go" ? "" :
+    v.statut==="insuffisant" ? " · ⚠ échantillon insuffisant (n<200) : chiffre indicatif, pas une preuve"
+    : " · ⚠ flux no-go : la stratégie n'a pas d'edge prouvé ici";
+  det.textContent=`${f.n} trades · taux ${f.winrate==null?"—":Math.round(100*f.winrate)+" %"}`+
+    ` · PF ${f.profit_factor==null?"—":f.profit_factor.toFixed(2)}`+
+    ` · capital ${sp.cap.toLocaleString("fr-FR")} $ · risque ${(100*sp.riskFrac).toFixed(1)} %`+
+    `${dir==="short"?" (×"+sp.srf+")":""} · verdict : ${v.statut||"—"}${warn}`;
+}
+
+// Recalcul instantané quand on change un réglage du simulateur.
+for(const id of ["sim-cap","sim-risk","sim-sym","sim-tf","sim-dir"]){
   const el=document.getElementById(id);
-  if(el) el.addEventListener("input", ()=>{ el.dataset.touched="1"; renderLivre(); });
+  if(el){
+    const h=()=>{ el.dataset.touched="1"; renderLivre(); };
+    el.addEventListener("input", h);
+    el.addEventListener("change", h);
+  }
 }
 
 // ---- Vue Mon journal (saisie manuelle) -------------------------------------
