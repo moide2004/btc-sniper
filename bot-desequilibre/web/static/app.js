@@ -206,10 +206,16 @@ async function refreshLivre(){
 function esc(s){ const d=document.createElement("div"); d.textContent=s==null?"":String(s);
   return d.innerHTML; }
 async function postJSON(url, body){
-  const r = await fetch(url,{method:"POST",credentials:"same-origin",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
-  if(r.status===401){ window.location="/login"; return null; }
-  return r.json().then(j=>({ok:r.ok, ...j}));
+  try{
+    const r = await fetch(url,{method:"POST",credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+    if(r.status===401){ window.location="/login"; return null; }
+    let j={};
+    try{ j=await r.json(); }catch(_){ j={error:"réponse serveur invalide (HTTP "+r.status+")"}; }
+    return {ok:r.ok, ...j};
+  }catch(e){
+    return {ok:false, error:"réseau : "+e.message};
+  }
 }
 
 async function refreshJournalPerso(){
@@ -240,6 +246,7 @@ async function refreshJournalPerso(){
 async function jpAdd(){
   const v=id=>document.getElementById(id).value;
   const msg=document.getElementById("jp-msg");
+  msg.textContent="envoi…";
   const res=await postJSON("/api/journal-perso",{symbol:v("jp-sym"),timeframe:v("jp-tf"),
     direction:v("jp-dir"),entry:v("jp-entry"),sl:v("jp-sl"),tp:v("jp-tp"),
     size_units:v("jp-size"),note:v("jp-note")});
@@ -260,7 +267,10 @@ async function jpDelete(id){
   await postJSON(`/api/journal-perso/${id}/supprimer`,{});
   refreshJournalPerso();
 }
-document.getElementById("jp-add").addEventListener("click", jpAdd);
+window.jpClose = jpClose;
+window.jpDelete = jpDelete;
+const _jpBtn = document.getElementById("jp-add");
+if(_jpBtn) _jpBtn.addEventListener("click", jpAdd);
 
 function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); refreshJournalPerso(); }
 refreshAll();
