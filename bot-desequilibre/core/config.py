@@ -83,6 +83,11 @@ class Config:
         self.web_password_hash = _get("WEB_PASSWORD_HASH", "")
         self.flask_secret_key = _get("FLASK_SECRET_KEY", "")
 
+        # Push téléphone via ntfy (amendement BRIEF 2026-07-25, tickets seuls).
+        # Vide = désactivé. Le topic est un secret : long et imprévisible.
+        self.ntfy_topic = _get("NTFY_TOPIC", "").strip()
+        self.ntfy_url = _get("NTFY_URL", "https://ntfy.sh").strip()
+
     def ensure_dirs(self) -> None:
         for d in (self.db_path.parent, self.ohlcv_dir, self.log_dir, self.backup_dir):
             d.mkdir(parents=True, exist_ok=True)

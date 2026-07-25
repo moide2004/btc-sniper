@@ -40,7 +40,19 @@ no-go / z insuffisants) recalculé chaque nuit ; détail des critères en infobu
 sur chaque verdict. Un flux « no-go » est un résultat de recherche, pas un échec
 du logiciel. **Exécution réelle HORS PÉRIMÈTRE.**
 
-> Aucune notification externe. Aucun ordre réel, jamais. Voir `BRIEF.md`.
+> Aucun ordre réel, jamais. Notifications : cloche interne + **push ntfy
+> optionnel sur les tickets** (amendement BRIEF 2026-07-25, désactivé par
+> défaut — voir §« Notifications téléphone »). Voir `BRIEF.md`.
+
+## Notifications téléphone (optionnel — ntfy)
+1. Installer l'appli **ntfy** (Play Store / App Store, gratuite, sans compte).
+2. Dans l'appli : **+ / Subscribe to topic** → choisir un sujet SECRET, long et
+   imprévisible (ex. `bot-deseq-rody-x7k2m9`). Le sujet fait office de clé.
+3. Sur le serveur, ajouter dans `.env` : `NTFY_TOPIC=bot-deseq-rody-x7k2m9`
+4. Redémarrer le worker (always-on : bouton restart). Test manuel :
+   `curl -d "test" https://ntfy.sh/bot-deseq-rody-x7k2m9`
+Chaque **ticket** envoie alors une notification (priorité haute + 🚨 si
+« solide », normale + 🔔 si « spéculatif »). `NTFY_TOPIC` vide = aucun envoi.
 
 ## ⚠️ Point à confirmer (§9.1) — orientation Fibonacci
 La géométrie du SL du BRIEF (« SL long **sous** 78,6 %, SL short **au-dessus** de

@@ -7,8 +7,9 @@ choix logistique n'est modifié sans question préalable justifiée par un
 **mécanisme de marché** (§9). Projet éducatif ; rien n'est un conseil financier.
 
 ## Invariants
-- **Aucun ordre réel**, jamais. **Aucune notification externe** — cloche interne
-  seule.
+- **Aucun ordre réel**, jamais. Notifications : cloche interne ; **push ntfy
+  OPTIONNEL à l'émission de tickets** (AMENDEMENT demandé par l'humain le
+  2026-07-25 — `NTFY_TOPIC` vide = désactivé, comportement d'origine).
 - Jamais un p̂ sans **n** ni **intervalle** ; jamais une EV sans **coûts**.
 - **UTC partout.** Un seul écrivain (worker) ; la web app lit.
 - **15m = plancher** d'analyse ; le 1m sert à la collecte/backfill/fills.

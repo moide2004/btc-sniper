@@ -21,6 +21,7 @@ from .data_source import (
     TF_MS, load_ohlcv, load_ohlcv_tail, resample_1m,
 )
 from .fibonacci import FibParams, Setup, detect_setups, latest_setup
+from .notify import send_push
 from .paper import (
     advance_live_position, flux_summary, mc_drawdown_p95, new_live_position,
     simulate_flux,
@@ -106,6 +107,14 @@ def _emit_ticket(store: Store, sym: str, tf: str, setup, corr: Optional[float],
                     f"{note.get('annotation')} (n={note.get('n')}, "
                     f"p̂={_fmt(note.get('p_hat'))}, EV_prud={_fmt(note.get('ev_prudent_taker'))})",
                     {"ticket_id": tid, "annotation": note.get("annotation")})
+    # Push téléphone (optionnel, amendement BRIEF 2026-07-25) — best-effort.
+    send_push(
+        f"Ticket {sym} {tf} {setup.direction.upper()} — {note.get('annotation')}",
+        f"Entrée ≈ {setup.entry:.2f} · SL {setup.sl:.2f} · TP {setup.tp(CONFIG.rr_mult):.2f}\n"
+        f"p̂={_fmt(note.get('p_hat'))} · p_prudent={_fmt(note.get('p_prudent'))} "
+        f"· n={note.get('n')} · EV_prud={_fmt(note.get('ev_prudent_taker'))}",
+        priority="high" if note.get("solide") else "default",
+        tags="rotating_light" if note.get("solide") else "bell")
     if logger:
         logger.info(f"Ticket #{tid} {sym} {tf} {setup.direction} ({note.get('annotation')})")
     return tid
