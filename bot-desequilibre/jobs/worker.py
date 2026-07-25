@@ -53,6 +53,7 @@ class Worker:
         self._stop = threading.Event()
         self._switched_to_rest = False
         self._last_beat = 0.0
+        self._beat_fails = 0
 
     # ----- Heartbeat (maintenu pendant les phases lourdes) -----------------
     def _beat_if_due(self, status="ok") -> None:
@@ -61,8 +62,32 @@ class Worker:
             try:
                 self.store.write_heartbeat(self.cycle, self.active_source, status)
                 self._last_beat = now
+                self._beat_fails = 0
             except Exception as e:
-                log.error(f"Heartbeat : {e!r}")
+                self._beat_fails += 1
+                log.error(f"Heartbeat : {e!r} (échec consécutif n°{self._beat_fails})")
+                if self._beat_fails >= 3:
+                    self._reopen_store()
+
+    def _reopen_store(self) -> None:
+        """AUTO-RÉPARATION : une connexion SQLite peut mourir définitivement
+        (fichier remplacé sous le processus, incident NFS). Plutôt que d'errer
+        des heures avec un bandeau orange, on recrée la connexion."""
+        log.warning("Reconnexion du Store (connexion SQLite considérée morte)")
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        try:
+            self.store = Store()
+            self._beat_fails = 0
+            self.store.write_heartbeat(self.cycle, self.active_source, "ok")
+            self._last_beat = time.time()
+            self.store.add_event("worker", "warning",
+                                 "Connexion base recréée après échecs d'écriture répétés")
+            log.info("Store reconnecté avec succès")
+        except Exception as e:
+            log.error(f"Reconnexion Store impossible (nouvel essai au prochain cycle) : {e!r}")
 
     # ----- Signaux websocket (traités au thread principal, §4.5) -----------
     def _drain_ws_signals(self) -> None:

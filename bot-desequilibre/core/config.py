@@ -46,6 +46,10 @@ class Config:
         self.ohlcv_dir = _path("OHLCV_DIR", "data/ohlcv")
         self.log_dir = _path("LOG_DIR", "logs")
         self.backup_dir = _path("BACKUP_DIR", "backups")
+        # Mode de journal SQLite. "wal" (défaut) est idéal sur disque local ;
+        # sur stockage RÉSEAU (NFS — cas PythonAnywhere) le WAL est peu fiable
+        # (mmap partagé) → mettre DB_JOURNAL_MODE=delete dans .env.
+        self.db_journal_mode = _get("DB_JOURNAL_MODE", "wal").strip().lower()
 
         self.capital_usd = float(_get("CAPITAL_USD", "3000"))
         self.fee_taker = float(_get("FEE_TAKER", "0.0010"))

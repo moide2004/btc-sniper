@@ -161,6 +161,18 @@ from web.app import app as application
 
 ---
 
+## 4bis. Bandeau orange persistant / « disk I/O error » (PythonAnywhere)
+Le disque PythonAnywhere est un stockage **réseau (NFS)** : le mode WAL de
+SQLite y est peu fiable (heartbeat en échec → bandeau orange alors que les
+bougies avancent, corruptions à répétition). **Remède définitif** :
+1. Arrêter le worker (et l'always-on).
+2. `.env` : ajouter `DB_JOURNAL_MODE=delete`
+3. Convertir la base :
+   `sqlite3 data/moteur.db "PRAGMA wal_checkpoint(TRUNCATE);" ; sqlite3 data/moteur.db "PRAGMA journal_mode=DELETE;" ; rm -f data/moteur.db-wal data/moteur.db-shm`
+4. Relancer l'always-on.
+En complément, le worker est **auto-réparant** : 3 échecs d'écriture consécutifs
+→ reconnexion automatique de la base (retour au vert en ~90 s au pire).
+
 ## 5. Restauration (§7.7 esprit)
 Sauvegardes dans `backups/AAAA-MM-JJ/moteur.db` (14 j, garde anti-corruption).
 Restaurer : arrêter le worker → `cp backups/AAAA-MM-JJ/moteur.db data/moteur.db`

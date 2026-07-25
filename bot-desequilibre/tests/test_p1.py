@@ -57,6 +57,18 @@ def test_store():
     print("[1] Store SQLite WAL")
     st = Store()
     check("mode WAL actif", st.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal")
+    # Mode NFS-sûr (PythonAnywhere) : DB_JOURNAL_MODE=delete appliqué.
+    CONFIG.db_journal_mode = "delete"
+    st2 = Store(path=Path(_TMP) / "moteur_delete.db")
+    check("mode DELETE configurable (NFS)",
+          st2.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete")
+    st2.close()
+    CONFIG.db_journal_mode = "invalide"
+    st3 = Store(path=Path(_TMP) / "moteur_fallback.db")
+    check("mode invalide → repli WAL",
+          st3.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal")
+    st3.close()
+    CONFIG.db_journal_mode = "wal"
     st.write_heartbeat(3, "binance", "ok")
     check("heartbeat écrit", st.get_heartbeat()["cycle"] == 3)
     age = st.heartbeat_age_seconds()
@@ -108,6 +120,31 @@ def test_resample():
     check("nb barres 1h complètes = 4", len(resample_1m(df, "1h")) == 4)
 
 
+def test_worker_selfheal():
+    print("[5bis] Worker : auto-réparation de la connexion base")
+    from jobs.worker import Worker
+    w = Worker.__new__(Worker)          # sans démarrer les threads
+    w.store = Store()
+    w.cycle, w.active_source = 1, "test"
+    w._last_beat, w._beat_fails = 0.0, 0
+
+    class DeadStore:
+        def write_heartbeat(self, *a, **k):
+            raise RuntimeError("disk I/O error simulé")
+        def close(self):
+            pass
+    w.store.close()
+    w.store = DeadStore()
+    for _ in range(3):                  # 3 échecs consécutifs → reconnexion
+        w._last_beat = 0.0
+        w._beat_if_due()
+    check("reconnexion déclenchée après 3 échecs",
+          isinstance(w.store, Store), type(w.store).__name__)
+    check("heartbeat réécrit après reconnexion",
+          w.store.get_heartbeat() is not None and w._beat_fails == 0)
+    w.store.close()
+
+
 def test_reprise():
     print("[5] Reprise idempotente (comblage → 0 trou)")
     for s in (CONFIG.ohlcv_dir / "ETHUSDT_1m_segments").glob("*.parquet"):
@@ -128,6 +165,7 @@ def main():
     test_dual_asset_isolation()
     test_append_continuity()
     test_resample()
+    test_worker_selfheal()
     test_reprise()
     print(f"\nRésultat : {PASS} réussis, {FAIL} échoués")
     return 1 if FAIL else 0

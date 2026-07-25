@@ -91,8 +91,13 @@ class Store:
         if read_only:
             cur.execute("PRAGMA busy_timeout=30000;")
         else:
-            cur.execute("PRAGMA journal_mode=WAL;")
-            cur.execute("PRAGMA synchronous=NORMAL;")
+            # WAL sur disque local ; DELETE (rollback journal) sur NFS où le
+            # WAL provoque des « disk I/O error » et des corruptions.
+            mode = CONFIG.db_journal_mode
+            if mode not in ("wal", "delete", "truncate", "persist"):
+                mode = "wal"
+            cur.execute(f"PRAGMA journal_mode={mode.upper()};")
+            cur.execute("PRAGMA synchronous=" + ("NORMAL" if mode == "wal" else "FULL") + ";")
             cur.execute("PRAGMA busy_timeout=30000;")
         cur.close()
         if not read_only:

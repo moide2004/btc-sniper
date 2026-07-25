@@ -11,7 +11,10 @@ choix logistique n'est modifié sans question préalable justifiée par un
   OPTIONNEL à l'émission de tickets** (AMENDEMENT demandé par l'humain le
   2026-07-25 — `NTFY_TOPIC` vide = désactivé, comportement d'origine).
 - Jamais un p̂ sans **n** ni **intervalle** ; jamais une EV sans **coûts**.
-- **UTC partout.** Un seul écrivain (worker) ; la web app lit.
+- **UTC partout.** Un seul écrivain (worker) ; la web app lit. SQLite WAL en
+  local ; **DELETE sur NFS/PythonAnywhere** (AMENDEMENT 2026-07-25 : le WAL sur
+  stockage réseau causait « disk I/O error » et corruptions ; worker
+  auto-réparant — reconnexion après 3 échecs d'écriture).
 - **15m = plancher** d'analyse ; le 1m sert à la collecte/backfill/fills.
 - Dual-actif **BTC + ETH**, capital et budget de risque **partagés** (§5.4).
 
