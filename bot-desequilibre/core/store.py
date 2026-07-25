@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts_utc TEXT NOT NULL,
     symbol TEXT NOT NULL, timeframe TEXT NOT NULL, payload TEXT NOT NULL
 );
+-- Journal PERSONNEL de l'humain (écrit par la web app — même exception que
+-- web_actions : table dédiée, isolée des tables du bot). ---------------------
+CREATE TABLE IF NOT EXISTS journal_perso (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ts_utc TEXT NOT NULL,
+    closed_utc TEXT, symbol TEXT NOT NULL, timeframe TEXT, direction TEXT,
+    entry REAL, sl REAL, tp REAL, size_units REAL, exit_price REAL,
+    r_result REAL, pnl_usd REAL, note TEXT
+);
 """
 
 
@@ -299,6 +307,50 @@ class Store:
             "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r["id"], "ts_utc": r["ts_utc"], "symbol": r["symbol"],
                  "timeframe": r["timeframe"], **json.loads(r["payload"])} for r in rows]
+
+    # ----- Journal PERSONNEL (saisie manuelle via la web app) -------------
+    def add_journal_perso(self, symbol: str, timeframe: Optional[str],
+                          direction: Optional[str], entry: Optional[float],
+                          sl: Optional[float], tp: Optional[float],
+                          size_units: Optional[float], note: Optional[str]) -> int:
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO journal_perso (ts_utc, symbol, timeframe, direction,
+                   entry, sl, tp, size_units, note) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (utc_now_iso(), symbol, timeframe, direction, entry, sl, tp,
+                 size_units, note))
+            return int(cur.lastrowid)
+
+    def close_journal_perso(self, jid: int, exit_price: float) -> Optional[dict[str, Any]]:
+        """Clôture une ligne : calcule R (par rapport au stop) et PnL si possible."""
+        row = self.conn.execute("SELECT * FROM journal_perso WHERE id=?", (jid,)).fetchone()
+        if not row or row["closed_utc"]:
+            return None
+        r_result = pnl = None
+        e, sl, d = row["entry"], row["sl"], (row["direction"] or "").lower()
+        if e is not None and sl is not None and d in ("long", "short"):
+            stop_dist = abs(e - sl)
+            if stop_dist > 0:
+                r_result = (exit_price - e) / stop_dist if d == "long" \
+                    else (e - exit_price) / stop_dist
+                if row["size_units"]:
+                    pnl = r_result * row["size_units"] * stop_dist
+        with self.conn:
+            self.conn.execute(
+                """UPDATE journal_perso SET closed_utc=?, exit_price=?,
+                   r_result=?, pnl_usd=? WHERE id=?""",
+                (utc_now_iso(), exit_price, r_result, pnl, jid))
+        return {"id": jid, "r_result": r_result, "pnl_usd": pnl}
+
+    def delete_journal_perso(self, jid: int) -> bool:
+        with self.conn:
+            return self.conn.execute(
+                "DELETE FROM journal_perso WHERE id=?", (jid,)).rowcount > 0
+
+    def list_journal_perso(self, limit: int = 300) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM journal_perso ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     # ----- Santé / config -------------------------------------------------
     def record_health(self, cycle_kind: str, duration_s=None, cpu_s=None,

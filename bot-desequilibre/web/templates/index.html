@@ -47,6 +47,13 @@
     .tk{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:11px}
     .tk h3{margin:0 0 6px;font-size:14px;display:flex;align-items:center;gap:8px}
     .tk .lv{display:flex;justify-content:space-between;font-size:12px;padding:2px 0}
+    .jp-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;align-items:center}
+    .jp-form input,.jp-form select{padding:8px;border-radius:8px;border:1px solid var(--line);
+      background:#0f1115;color:var(--txt);font-size:13px;width:100%;box-sizing:border-box}
+    .btn{padding:8px 12px;border:0;border-radius:8px;background:#3b5bdb;color:#fff;
+      font-weight:600;cursor:pointer;font-size:13px}
+    .btn.small{padding:4px 8px;font-size:11px}
+    .btn.danger{background:#7a2b2b}
   </style>
 </head>
 <body>
@@ -67,6 +74,7 @@
     <div class="tab" data-view="matrice">Matrice <span class="badge" id="b-mat">0</span></div>
     <div class="tab" data-view="tickets">Tickets <span class="badge" id="b-tk">0</span></div>
     <div class="tab" data-view="livre">Livre &amp; budget</div>
+    <div class="tab" data-view="perso">Mon journal <span class="badge" id="b-jp">0</span></div>
   </div>
 
   <!-- VUE 1 — SANTÉ -->
@@ -140,6 +148,37 @@
     <div class="card">
       <div class="k" style="margin-bottom:6px">Journal des trades (paper trading)</div>
       <ul id="journal"><li class="muted">Aucun trade encore.</li></ul>
+    </div>
+  </section>
+
+  <!-- VUE 5 — MON JOURNAL (saisie manuelle de TES trades) -->
+  <section id="v-perso" class="view">
+    <div class="card">
+      <div class="k" style="margin-bottom:8px">Ajouter un trade (saisie libre — indépendant du bot)</div>
+      <div class="jp-form">
+        <input id="jp-sym" placeholder="Actif (ex : BTCUSDT)" list="jp-syms">
+        <datalist id="jp-syms"><option>BTCUSDT</option><option>ETHUSDT</option></datalist>
+        <select id="jp-tf"><option value="">TF…</option><option>15m</option><option>30m</option>
+          <option>1h</option><option>4h</option><option>12h</option><option>1D</option></select>
+        <select id="jp-dir"><option value="">sens…</option><option value="long">long</option>
+          <option value="short">short</option></select>
+        <input id="jp-entry" type="number" step="any" placeholder="Entrée">
+        <input id="jp-sl" type="number" step="any" placeholder="SL">
+        <input id="jp-tp" type="number" step="any" placeholder="TP (optionnel)">
+        <input id="jp-size" type="number" step="any" placeholder="Taille (unités, opt.)">
+        <input id="jp-note" placeholder="Note (setup, raison, émotion…)" style="grid-column:1/-1">
+        <button id="jp-add" class="btn">Ajouter le trade</button>
+        <span id="jp-msg" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Mes trades</div>
+      <div class="scroll"><table><thead><tr>
+        <th>Date (UTC)</th><th>Actif · TF · sens</th><th>Entrée</th><th>SL</th><th>TP</th>
+        <th>Sortie</th><th>R</th><th>PnL $</th><th>Note</th><th></th>
+      </tr></thead><tbody id="jp-body"><tr><td class="muted" colspan="10">Aucun trade saisi.</td></tr></tbody></table></div>
+      <p class="muted">À la clôture, le <b>R</b> est calculé par rapport à ton stop
+        (|sortie−entrée| / |entrée−SL|) et le PnL si la taille est renseignée.</p>
     </div>
   </section>
 

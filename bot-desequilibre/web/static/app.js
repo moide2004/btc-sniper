@@ -202,6 +202,66 @@ async function refreshLivre(){
   }catch(e){}
 }
 
-function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); }
+// ---- Vue Mon journal (saisie manuelle) -------------------------------------
+function esc(s){ const d=document.createElement("div"); d.textContent=s==null?"":String(s);
+  return d.innerHTML; }
+async function postJSON(url, body){
+  const r = await fetch(url,{method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  if(r.status===401){ window.location="/login"; return null; }
+  return r.json().then(j=>({ok:r.ok, ...j}));
+}
+
+async function refreshJournalPerso(){
+  try{
+    const d = await getJSON("/api/journal-perso"); if(!d) return;
+    const rows=d.trades||[];
+    document.getElementById("b-jp").textContent = rows.filter(t=>!t.closed_utc).length;
+    const body=document.getElementById("jp-body");
+    if(!rows.length){ body.innerHTML='<tr><td class="muted" colspan="10">Aucun trade saisi.</td></tr>'; return; }
+    body.innerHTML = rows.map(t=>{
+      const open=!t.closed_utc;
+      return `<tr>
+        <td>${esc((t.ts_utc||"").replace("T"," ").slice(0,16))}</td>
+        <td>${esc(t.symbol)}${t.timeframe?" · "+esc(t.timeframe):""}${t.direction?` · <span class="${esc(t.direction)}">${esc(t.direction)}</span>`:""}</td>
+        <td>${num(t.entry)}</td><td>${num(t.sl)}</td><td>${num(t.tp)}</td>
+        <td>${open?'<span class="muted">ouvert</span>':num(t.exit_price)}</td>
+        <td class="${evClass(t.r_result)}">${t.r_result==null?"—":signed(t.r_result,2)}</td>
+        <td class="${evClass(t.pnl_usd)}">${t.pnl_usd==null?"—":signed(t.pnl_usd,0)}</td>
+        <td style="text-align:left;max-width:260px;white-space:normal">${esc(t.note)}</td>
+        <td style="white-space:nowrap">
+          ${open?`<button class="btn small" onclick="jpClose(${t.id})">clôturer</button> `:""}
+          <button class="btn small danger" onclick="jpDelete(${t.id})">✕</button></td>
+      </tr>`;
+    }).join("");
+  }catch(e){}
+}
+
+async function jpAdd(){
+  const v=id=>document.getElementById(id).value;
+  const msg=document.getElementById("jp-msg");
+  const res=await postJSON("/api/journal-perso",{symbol:v("jp-sym"),timeframe:v("jp-tf"),
+    direction:v("jp-dir"),entry:v("jp-entry"),sl:v("jp-sl"),tp:v("jp-tp"),
+    size_units:v("jp-size"),note:v("jp-note")});
+  if(!res) return;
+  if(!res.ok){ msg.textContent="⚠ "+(res.error||"erreur"); return; }
+  msg.textContent="✓ ajouté";
+  ["jp-entry","jp-sl","jp-tp","jp-size","jp-note"].forEach(i=>document.getElementById(i).value="");
+  refreshJournalPerso();
+}
+async function jpClose(id){
+  const p=prompt("Prix de sortie ?"); if(p==null||p==="") return;
+  const res=await postJSON(`/api/journal-perso/${id}/cloture`,{exit_price:p});
+  if(res&&!res.ok) alert(res.error||"erreur");
+  refreshJournalPerso();
+}
+async function jpDelete(id){
+  if(!confirm("Supprimer cette ligne du journal ?")) return;
+  await postJSON(`/api/journal-perso/${id}/supprimer`,{});
+  refreshJournalPerso();
+}
+document.getElementById("jp-add").addEventListener("click", jpAdd);
+
+function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); refreshJournalPerso(); }
 refreshAll();
 setInterval(refreshAll, 15000);

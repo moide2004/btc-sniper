@@ -153,6 +153,64 @@ def api_livre():
     })
 
 
+# ----- Journal PERSONNEL (seule écriture web : table dédiée journal_perso) ---
+def _write_store() -> Store:
+    return Store(read_only=False)
+
+
+def _f_or_none(v):
+    try:
+        return None if v in (None, "") else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/journal-perso", methods=["GET", "POST"])
+@login_required
+def api_journal_perso():
+    if request.method == "GET":
+        with _read_store() as st:
+            rows = st.list_journal_perso()
+        return jsonify({"generated_at": utc_now_iso(), "trades": rows})
+    d = request.get_json(silent=True) or {}
+    symbol = str(d.get("symbol") or "").strip().upper()[:20]
+    if not symbol:
+        return jsonify({"error": "actif requis"}), 400
+    direction = str(d.get("direction") or "").strip().lower()
+    if direction not in ("long", "short", ""):
+        return jsonify({"error": "sens invalide"}), 400
+    with _write_store() as st:
+        jid = st.add_journal_perso(
+            symbol=symbol, timeframe=str(d.get("timeframe") or "").strip()[:8] or None,
+            direction=direction or None, entry=_f_or_none(d.get("entry")),
+            sl=_f_or_none(d.get("sl")), tp=_f_or_none(d.get("tp")),
+            size_units=_f_or_none(d.get("size_units")),
+            note=str(d.get("note") or "").strip()[:500] or None)
+    return jsonify({"ok": True, "id": jid})
+
+
+@app.route("/api/journal-perso/<int:jid>/cloture", methods=["POST"])
+@login_required
+def api_journal_perso_close(jid: int):
+    d = request.get_json(silent=True) or {}
+    exit_price = _f_or_none(d.get("exit_price"))
+    if exit_price is None:
+        return jsonify({"error": "prix de sortie requis"}), 400
+    with _write_store() as st:
+        res = st.close_journal_perso(jid, exit_price)
+    if res is None:
+        return jsonify({"error": "ligne introuvable ou déjà clôturée"}), 404
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/journal-perso/<int:jid>/supprimer", methods=["POST"])
+@login_required
+def api_journal_perso_delete(jid: int):
+    with _write_store() as st:
+        ok = st.delete_journal_perso(jid)
+    return jsonify({"ok": ok}) if ok else (jsonify({"error": "introuvable"}), 404)
+
+
 @app.route("/api/probas")
 @login_required
 def api_probas():
