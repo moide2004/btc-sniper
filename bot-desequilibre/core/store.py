@@ -348,8 +348,11 @@ class Store:
                 "DELETE FROM journal_perso WHERE id=?", (jid,)).rowcount > 0
 
     def list_journal_perso(self, limit: int = 300) -> list[dict[str, Any]]:
-        rows = self.conn.execute(
-            "SELECT * FROM journal_perso ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        try:
+            rows = self.conn.execute(
+                "SELECT * FROM journal_perso ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        except sqlite3.OperationalError:      # table pas encore créée (base plus vieille)
+            return []
         return [dict(r) for r in rows]
 
     # ----- Santé / config -------------------------------------------------
