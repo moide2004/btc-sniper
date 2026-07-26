@@ -74,38 +74,67 @@ async function refreshEvents(){
   }catch(e){}
 }
 
-// ---- Vue Matrice (§3) ------------------------------------------------------
+// ---- Vue Matrice (§3) — profil rrMult sélectionnable -----------------------
+let matriceData = null;
 async function refreshMatrice(){
   try{
     const d = await getJSON("/api/probas"); if(!d) return;
+    matriceData = d;
     document.getElementById("rrlive").textContent = num(d.rr_live,1);
     const c = d.corr_btc_eth;
     document.getElementById("corr").textContent = c==null? "—" : num(c,2);
     document.getElementById("corr2").textContent = c==null? "—" : num(c,2);
-    const cases = (d.cases||[]).slice().sort((a,b)=>
-      a.symbol.localeCompare(b.symbol) ||
-      TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
-      a.direction.localeCompare(b.direction));
-    const body=document.getElementById("mat-body");
-    if(!cases.length){ body.innerHTML='<tr><td class="muted" colspan="10">Matrice vide — lancer <code>jobs/daily_update.py</code>.</td></tr>'; }
-    else{
-      body.innerHTML = cases.map(c=>{
-        const wf=c.wf||{}, w=c.wilson||[null,null], sol=isSolide(c);
-        return `<tr>
-          <td><span class="pill ${sol?'solide':'spec'}">${sol?'solide':'spéc.'}</span>
-              ${c.symbol} · ${c.timeframe} · <span class="${c.direction}">${c.direction}</span></td>
-          <td>${c.n==null?'—':c.n}</td><td>${pct(c.p_hat)}</td>
-          <td>${w[0]==null?'—':pct(w[0],0)+'–'+pct(w[1],0)}</td>
-          <td>${pct(c.p_prudent)}</td>
-          <td class="${evClass(c.ev_prudent_taker)}">${signed(c.ev_prudent_taker)}</td>
-          <td class="${evClass(c.ev_prudent_maker)}">${signed(c.ev_prudent_maker)}</td>
-          <td>${c.k_max==null?'—':c.k_max}</td><td>${num(c.cvar99_r)}</td>
-          <td class="${wfClass(wf.status)}">${wf.status||'—'}${wf.retention!=null?' ('+num(wf.retention,2)+')':''}</td>
-        </tr>`;
-      }).join("");
+    // Alimente le sélecteur avec la grille des rr disponibles (union des cases).
+    const sel=document.getElementById("rr-sel");
+    const keys=[...new Set((d.cases||[]).flatMap(x=>Object.keys(x.rr_grid||{})))].sort(
+      (a,b)=>parseFloat(a)-parseFloat(b));
+    const liveKey=Number(d.rr_live).toFixed(2);
+    const cur = sel.value || liveKey;
+    if(sel.options.length !== keys.length){
+      sel.innerHTML = keys.map(k=>`<option value="${k}">${parseFloat(k)} R${k===liveKey?" (vivant)":""}</option>`).join("");
     }
-    document.getElementById("b-mat").textContent = cases.filter(isSolide).length;
+    sel.value = keys.includes(cur) ? cur : liveKey;
+    renderMatrice();
   }catch(e){}
+}
+
+function renderMatrice(){
+  const d = matriceData; if(!d) return;
+  const key = document.getElementById("rr-sel").value || Number(d.rr_live).toFixed(2);
+  const cases = (d.cases||[]).slice().sort((a,b)=>
+    a.symbol.localeCompare(b.symbol) ||
+    TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
+    a.direction.localeCompare(b.direction));
+  const body=document.getElementById("mat-body");
+  // Vue par case au rr choisi (repli sur les champs du rr vivant si absent).
+  const views = cases.map(c=>{
+    const blk=(c.rr_grid||{})[key];
+    const wf=((c.wf_grid||{})[key]) || (blk?{}:c.wf) || {};
+    const v = blk ? {...c, ...blk, wf} : {...c, wf:c.wf||{}};
+    return v;
+  });
+  if(!views.length){ body.innerHTML='<tr><td class="muted" colspan="10">Matrice vide — lancer <code>jobs/daily_update.py</code>.</td></tr>'; }
+  else{
+    body.innerHTML = views.map(c=>{
+      const wf=c.wf||{}, w=c.wilson||[null,null], sol=isSolide(c);
+      return `<tr>
+        <td><span class="pill ${sol?'solide':'spec'}">${sol?'solide':'spéc.'}</span>
+            ${c.symbol} · ${c.timeframe} · <span class="${c.direction}">${c.direction}</span></td>
+        <td>${c.n==null?'—':c.n}</td><td>${pct(c.p_hat)}</td>
+        <td>${w[0]==null?'—':pct(w[0],0)+'–'+pct(w[1],0)}</td>
+        <td>${pct(c.p_prudent)}</td>
+        <td class="${evClass(c.ev_prudent_taker)}">${signed(c.ev_prudent_taker)}</td>
+        <td class="${evClass(c.ev_prudent_maker)}">${signed(c.ev_prudent_maker)}</td>
+        <td>${c.k_max==null?'—':c.k_max}</td><td>${num(c.cvar99_r)}</td>
+        <td class="${wfClass(wf.status)}">${wf.status||'—'}${wf.retention!=null?' ('+num(wf.retention,2)+')':''}</td>
+      </tr>`;
+    }).join("");
+  }
+  document.getElementById("b-mat").textContent = views.filter(isSolide).length;
+}
+{
+  const rrSel=document.getElementById("rr-sel");
+  if(rrSel) rrSel.addEventListener("change", renderMatrice);
 }
 
 // ---- Vue Tickets -----------------------------------------------------------

@@ -94,9 +94,14 @@
 
   <!-- VUE 2 — MATRICE DE PROBABILITÉS (§3) -->
   <section id="v-matrice" class="view">
-    <p class="muted" style="margin-top:0">Chiffres <b>mesurés</b> en double barrière (TP avant SL),
-      au rrMult vivant <b id="rrlive">—</b>. Jamais un p̂ sans <b>n</b> ni intervalle.
-      <span class="pill solide">solide</span> = EV prudente&nbsp;&gt;&nbsp;0 ∧ n&nbsp;≥&nbsp;200 ∧ walk-forward sain.</p>
+    <p class="muted" style="margin-top:0">Chiffres <b>mesurés</b> en double barrière (TP avant SL).
+      Jamais un p̂ sans <b>n</b> ni intervalle.
+      <span class="pill solide">solide</span> = EV prudente&nbsp;&gt;&nbsp;0 ∧ n&nbsp;≥&nbsp;200 ∧ walk-forward sain.
+      <label class="k" style="margin-left:12px">Profil TP affiché (rrMult) :
+        <select id="rr-sel" style="padding:4px 8px;border-radius:8px;border:1px solid var(--line);
+          background:#0f1115;color:var(--txt)"></select></label>
+      <span class="muted">— rr vivant (tickets) : <b id="rrlive">—</b>.
+        Un rr court (0,5) = profil « winrate élevé, petit gain » ; un rr long (1,5+) = l'inverse.</span></p>
     <div class="scroll">
       <table id="mat">
         <thead><tr>
@@ -205,6 +210,6 @@
     </div>
   </section>
 
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -250,6 +250,7 @@ def api_probas():
             "k_max": blk.get("k_max"), "cvar99_r": blk.get("cvar99_r"),
             "wf": (pl.get("walk_forward") or {}).get(rr_key, {}),
             "rr_grid": pl.get("rr", {}),
+            "wf_grid": pl.get("walk_forward", {}),
         })
     return jsonify({"generated_at": utc_now_iso(), "rr_live": CONFIG.rr_mult,
                     "corr_btc_eth": float(corr) if corr else None, "cases": cases,
