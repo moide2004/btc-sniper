@@ -23,7 +23,7 @@ from core.data_source import (  # noqa: E402
     BinanceMultiStream, DataSource, append_ohlcv, count_duplicates, find_gaps,
     last_open_time, load_ohlcv, MINUTE_MS,
 )
-from core.engine import bot2_live_scan, bot3_live_scan, live_scan, paper_step  # noqa: E402
+from core.engine import live_scan, paper_step  # noqa: E402
 from core.logging_setup import get_logger  # noqa: E402
 from core.store import Store, utc_now_ms  # noqa: E402
 
@@ -199,18 +199,6 @@ class Worker:
                         paper_step(self.store, utc_now_ms(), log)
                     except Exception as e:
                         log.warning(f"Paper trading : {e!r}")
-                    try:                             # Bot 2 : analyse marché + tickets
-                        n2 = bot2_live_scan(self.store, utc_now_ms(), log)
-                        if n2:
-                            log.info(f"Bot 2 : {n2} ticket(s) émis")
-                    except Exception as e:
-                        log.warning(f"Bot 2 scan : {e!r}")
-                    try:                             # Bot 3 : analyse marché + tickets
-                        n3 = bot3_live_scan(self.store, utc_now_ms(), log)
-                        if n3:
-                            log.info(f"Bot 3 : {n3} ticket(s) émis")
-                    except Exception as e:
-                        log.warning(f"Bot 3 scan : {e!r}")
             except Exception as e:
                 log.error(f"Cycle worker en échec (poursuite) : {e!r}")
                 status = "degraded"

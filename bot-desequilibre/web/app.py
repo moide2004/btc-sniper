@@ -257,33 +257,6 @@ def api_probas():
                     "note": "Chiffres MESURÉS (double barrière), pas des prédictions."})
 
 
-def _lab_api(bot_id: str, kv_backtest: str, kv_market: str):
-    import json as _json
-    with _read_store() as st:
-        raw = st.get_kv(kv_backtest)
-        raw_mkt = st.get_kv(kv_market)
-        tickets = [t for t in st.list_tickets(limit=200) if t.get("bot") == bot_id][:20]
-    return jsonify({
-        "generated_at": utc_now_iso(),
-        "backtest": _json.loads(raw) if raw else None,
-        "market": _json.loads(raw_mkt) if raw_mkt else None,
-        "tickets": tickets,
-        "note": None if raw else f"Bot {bot_id} pas encore calculé — lancer jobs/daily_update.py.",
-    })
-
-
-@app.route("/api/bot2")
-@login_required
-def api_bot2():
-    return _lab_api("2", "backtest2", "bot2_market")
-
-
-@app.route("/api/bot3")
-@login_required
-def api_bot3():
-    return _lab_api("3", "backtest3", "bot3_market")
-
-
 @app.route("/api/tickets")
 @login_required
 def api_tickets():
