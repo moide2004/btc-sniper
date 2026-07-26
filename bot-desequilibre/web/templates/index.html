@@ -189,23 +189,42 @@
         SL = extrême des 10 dernières bougies (borné en ATR) · TP = rr × stop · break-even ·
         <b>mêmes conditions honnêtes</b> que le Bot 1 : double barrière pessimiste, frais taker, walk-forward, verdict P5.
         Timeframes : <span id="b2-tfs">4h · 12h · 1D</span>.</p>
-      <div class="jp-form" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+      <div class="jp-form" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
         <label class="k">Profil TP (rrMult) <select id="b2-rr"></select></label>
+        <label class="k">Capital ($) <input id="b2-cap" type="number" step="any" min="1" placeholder="10000"></label>
+        <label class="k">Risque par trade (%) <input id="b2-risk" type="number" step="any" min="0.01" placeholder="1"></label>
         <span class="muted" style="align-self:end" id="b2-gen">—</span>
       </div>
       <div id="b2-bilan" class="muted" style="margin:10px 0 4px">—</div>
       <div id="b2-port" style="font-size:18px;font-weight:700;margin-bottom:8px">—</div>
     </div>
+
     <div class="card">
-      <div class="k" style="margin-bottom:6px">Résultats par flux (2 ans rejoués)</div>
+      <div class="k" style="margin-bottom:6px">📡 Analyse du marché EN DIRECT (dernière bougie close par flux)</div>
+      <div class="scroll"><table><thead><tr>
+        <th>Actif · TF</th><th>Tendance (MM20/50)</th><th>%K Stoch RSI</th><th>Zone</th>
+        <th>Signal MAINTENANT</th><th>Flux long (2 ans)</th><th>Flux short (2 ans)</th>
+      </tr></thead><tbody id="b2-mkt"><tr><td class="muted" colspan="7">En attente du worker
+        (rafraîchi à chaque cycle de maintenance, ~2 min).</td></tr></tbody></table></div>
+      <p class="muted">« Signal ⚡ » = un setup pullback vient de se valider à la clôture → ticket émis
+        + notification. Sinon : l'état te dit ce qu'il MANQUE (tendance à contre-sens, %K pas en zone…).</p>
+    </div>
+
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Tickets Bot 2 (setups signalés)</div>
+      <ul id="b2-tickets"><li class="muted">Aucun ticket Bot 2 pour l'instant.</li></ul>
+    </div>
+
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Résultats par flux (2 ans rejoués) — livre &amp; budget du Bot 2</div>
       <div class="scroll"><table><thead><tr>
         <th>Actif · TF · sens</th><th>n</th><th>taux</th><th>PF</th><th>espérance R</th>
         <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th>
-        <th>PnL $</th><th>verdict</th>
-      </tr></thead><tbody id="b2-body"><tr><td class="muted" colspan="12">Pas encore calculé —
+        <th>PnL $</th><th>% capital</th><th>verdict</th>
+      </tr></thead><tbody id="b2-body"><tr><td class="muted" colspan="13">Pas encore calculé —
         lancer <code>jobs/daily_update.py</code> (ou attendre 00:10 UTC).</td></tr></tbody></table></div>
-      <p class="muted">PnL affiché au capital/risque du serveur (.env). Un flux « no-go » est un
-        résultat de recherche : la stratégie n'a pas d'edge prouvé sur ce flux.</p>
+      <p class="muted">PnL et % capital recalculés instantanément pour TON capital et TON risque
+        (champs ci-dessus, short ×0,75). Un flux « no-go » est un résultat de recherche.</p>
     </div>
   </section>
 
@@ -243,6 +262,6 @@
     </div>
   </section>
 
-  <script src="/static/app.js?v=13"></script>
+  <script src="/static/app.js?v=14"></script>
 </body>
 </html>

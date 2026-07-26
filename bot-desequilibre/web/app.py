@@ -263,17 +263,22 @@ def api_bot2():
     import json as _json
     with _read_store() as st:
         raw = st.get_kv("backtest2")
-    if not raw:
-        return jsonify({"generated_at": utc_now_iso(), "backtest": None,
-                        "note": "Bot 2 pas encore calculé — lancer jobs/daily_update.py."})
-    return jsonify({"generated_at": utc_now_iso(), "backtest": _json.loads(raw)})
+        raw_mkt = st.get_kv("bot2_market")
+        tickets = [t for t in st.list_tickets(limit=200) if t.get("bot") == "2"][:20]
+    return jsonify({
+        "generated_at": utc_now_iso(),
+        "backtest": _json.loads(raw) if raw else None,
+        "market": _json.loads(raw_mkt) if raw_mkt else None,
+        "tickets": tickets,
+        "note": None if raw else "Bot 2 pas encore calculé — lancer jobs/daily_update.py.",
+    })
 
 
 @app.route("/api/tickets")
 @login_required
 def api_tickets():
     with _read_store() as st:
-        tickets = st.list_tickets(limit=100)
+        tickets = [t for t in st.list_tickets(limit=200) if t.get("bot") != "2"][:100]
     return jsonify({"generated_at": utc_now_iso(), "tickets": tickets,
                     "note": "Aucun ordre réel. Analyste : il signale, il n'exécute jamais."})
 

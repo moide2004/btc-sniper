@@ -115,6 +115,35 @@ def main():
     j = c.get("/api/bot2").get_json()
     check("/api/bot2 renvoie le backtest", j["backtest"]["strategie"].startswith("trend-pullback"))
 
+    print("[4] Scan live Bot 2 — analyse marché + tickets séparés")
+    from core.data_source import TF_MS
+    from core.engine import bot2_live_scan
+    from core.pullback import latest_pullback_setup
+    # Tronque le 1m à la fin de la bougie SIGNAL du dernier setup détecté :
+    # la dernière bougie 1h close devient exactement ce signal.
+    s_last = setups[-1]
+    df_cut = df_1m[df_1m["open_time"] <= s_last.signal_close_ms].reset_index(drop=True)
+    save_ohlcv_atomic(df_cut, "BTCUSDT", "1m")
+    df_tf_cut = resample_1m(df_cut, "1h")
+    lat = latest_pullback_setup(df_tf_cut)
+    check("latest_pullback_setup retrouve le signal (proxy)",
+          lat is not None and lat.direction == s_last.direction and lat.entry_is_proxy)
+    st2 = Store()
+    now = s_last.signal_open_ms + TF_MS["1h"] + 60_000
+    n_t = bot2_live_scan(st2, now)
+    check("1 ticket Bot 2 émis au signal", n_t == 1, f"émis={n_t}")
+    check("idempotent (re-scan → 0)", bot2_live_scan(st2, now) == 0)
+    mkt = json.loads(st2.get_kv("bot2_market"))
+    check("état du marché stocké (tendance + %K + signal)",
+          len(mkt["states"]) >= 1 and "trend" in mkt["states"][0]
+          and "k" in mkt["states"][0])
+    st2.close()
+    jt = c.get("/api/bot2").get_json()
+    check("ticket visible côté Bot 2", len(jt["tickets"]) == 1
+          and jt["tickets"][0]["bot"] == "2")
+    j1 = c.get("/api/tickets").get_json()
+    check("tickets Bot 1 NON pollués", all(t.get("bot") != "2" for t in j1["tickets"]))
+
     print(f"\nRésultat : {PASS} réussis, {FAIL} échoués")
     return 1 if FAIL else 0
 

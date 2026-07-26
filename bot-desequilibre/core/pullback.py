@@ -104,6 +104,64 @@ def _build(df, i, direction, atr_i, params) -> Optional[Setup]:
                  amplitude=hi_w - lo_w, atr=atr_i, fib={}, entry_is_proxy=proxy)
 
 
+def _warmup(params: PullbackParams) -> int:
+    return max(params.ma_slow, params.rsi_period + params.stoch_period
+               + params.k_smooth, params.atr_period) + 2
+
+
+def latest_pullback_setup(df_tf: pd.DataFrame,
+                          params: Optional[PullbackParams] = None) -> Optional[Setup]:
+    """Setup trend-pullback sur la DERNIÈRE bougie close (usage LIVE), ou None."""
+    params = params or PullbackParams()
+    n = len(df_tf)
+    if n < _warmup(params) + 1:
+        return None
+    close = df_tf["close"].to_numpy(dtype="float64")
+    ma_f = pd.Series(close).rolling(params.ma_fast).mean().to_numpy()
+    ma_s = pd.Series(close).rolling(params.ma_slow).mean().to_numpy()
+    k = stoch_rsi_k(close, params.rsi_period, params.stoch_period, params.k_smooth)
+    atr = atr_wilder(df_tf, params.atr_period).to_numpy()
+    i = n - 1
+    if not (np.isfinite(atr[i]) and atr[i] > 0 and np.isfinite(k[i])
+            and np.isfinite(k[i - 1]) and np.isfinite(ma_f[i]) and np.isfinite(ma_s[i])):
+        return None
+    if ma_f[i] > ma_s[i] and k[i - 1] < params.os_low <= k[i]:
+        return _build(df_tf, i, "long", atr[i], params)
+    if ma_f[i] < ma_s[i] and k[i - 1] > params.os_high >= k[i]:
+        return _build(df_tf, i, "short", atr[i], params)
+    return None
+
+
+def market_state(df_tf: pd.DataFrame,
+                 params: Optional[PullbackParams] = None) -> Optional[dict]:
+    """Photographie du marché à la dernière bougie close : tendance, %K, signal.
+    Sert à l'affichage « analyse du marché » (aucune décision, juste l'état)."""
+    params = params or PullbackParams()
+    n = len(df_tf)
+    if n < _warmup(params) + 1:
+        return None
+    close = df_tf["close"].to_numpy(dtype="float64")
+    ma_f = pd.Series(close).rolling(params.ma_fast).mean().to_numpy()
+    ma_s = pd.Series(close).rolling(params.ma_slow).mean().to_numpy()
+    k = stoch_rsi_k(close, params.rsi_period, params.stoch_period, params.k_smooth)
+    i = n - 1
+    if not (np.isfinite(k[i]) and np.isfinite(k[i - 1])
+            and np.isfinite(ma_f[i]) and np.isfinite(ma_s[i])):
+        return None
+    trend = "haussier" if ma_f[i] > ma_s[i] else "baissier" if ma_f[i] < ma_s[i] else "plat"
+    signal = None
+    if ma_f[i] > ma_s[i] and k[i - 1] < params.os_low <= k[i]:
+        signal = "long"
+    elif ma_f[i] < ma_s[i] and k[i - 1] > params.os_high >= k[i]:
+        signal = "short"
+    return {"close": float(close[i]), "ma_fast": float(ma_f[i]),
+            "ma_slow": float(ma_s[i]), "k": float(k[i]), "k_prev": float(k[i - 1]),
+            "trend": trend, "signal": signal,
+            "bar_open_ms": int(df_tf["open_time"].iloc[i]),
+            "oversold": bool(k[i] < params.os_low),
+            "overbought": bool(k[i] > params.os_high)}
+
+
 def detect_pullback_setups(df_tf: pd.DataFrame,
                            params: Optional[PullbackParams] = None) -> list[Setup]:
     """Tous les setups trend-pullback d'une série TF. Sans look-ahead : tous les

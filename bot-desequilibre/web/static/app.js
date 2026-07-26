@@ -440,16 +440,64 @@ const _jpBtn = document.getElementById("jp-add");
 if(_jpBtn) _jpBtn.addEventListener("click", jpAdd);
 
 // ---- Vue Bot 2 (laboratoire trend-pullback) --------------------------------
-let bot2Data = null;
+let bot2Data = null, bot2Market = null, bot2Tickets = [];
 async function refreshBot2(){
   try{
     const d = await getJSON("/api/bot2"); if(!d) return;
     bot2Data = d.backtest;
+    bot2Market = d.market;
+    bot2Tickets = d.tickets||[];
     renderBot2();
   }catch(e){}
 }
 
+function b2Params(){
+  const cap = parseFloat(document.getElementById("b2-cap").value);
+  const rk = parseFloat(document.getElementById("b2-risk").value);
+  const p = (livreData&&livreData.params)||{};
+  return {
+    cap: (isFinite(cap)&&cap>0) ? cap : (p.capital_usd||10000),
+    riskFrac: (isFinite(rk)&&rk>0) ? rk/100 : (p.risk_pct||0.01),
+    srf: p.short_risk_factor!=null ? p.short_risk_factor : 0.75,
+  };
+}
+
+function renderBot2Market(){
+  const body=document.getElementById("b2-mkt");
+  const tl=document.getElementById("b2-tickets");
+  if(tl){
+    tl.innerHTML = bot2Tickets.length ? bot2Tickets.map(t=>{
+      const fs=t.flux_stats||{};
+      return `<li><b>${esc(t.ts_utc)}</b> · ${esc(t.symbol)} ${esc(t.timeframe)}
+        <span class="${esc(t.direction)}">${esc((t.direction||"").toUpperCase())}</span>
+        — entrée ≈ ${num(t.entry_ref)} · SL ${num(t.sl)} · TP ${num(t.tp)}
+        · <span class="muted">flux : ${esc(fs.verdict||"non jugé")} (PF ${num(fs.pf)}, n=${fs.n??"—"})</span></li>`;
+    }).join("") : '<li class="muted">Aucun ticket Bot 2 pour l\'instant.</li>';
+  }
+  if(!body) return;
+  const sts = (bot2Market&&bot2Market.states)||[];
+  if(!sts.length){
+    body.innerHTML='<tr><td class="muted" colspan="7">En attente du worker (rafraîchi ~2 min ; redémarrer l\'always-on après mise à jour).</td></tr>';
+    return;
+  }
+  const vcls=v=>v==="go"?"good":v==="no-go"?"bad":"muted";
+  body.innerHTML = sts.map(s=>{
+    const up=s.trend==="haussier";
+    const zone = s.oversold?"survente (<20)":s.overbought?"surachat (>80)":"neutre";
+    const sig = s.signal ? `<b class="${s.signal}">⚡ ${s.signal.toUpperCase()}</b>` :
+      `<span class="muted">aucun — ${up?(s.oversold?"%K doit re-croiser 20":"attendre repli <20"):(s.overbought?"%K doit re-croiser 80":"attendre rebond >80")}</span>`;
+    const fx=d=>{const f=(s.flux||{})[d]||{};return `<span class="${vcls(f.verdict)}">${f.verdict||"—"}</span> <span class="muted">(PF ${num(f.pf)}, n=${f.n??"—"})</span>`;};
+    return `<tr>
+      <td>${esc(s.symbol)} · ${esc(s.timeframe)}</td>
+      <td class="${up?'good':'bad'}">${up?"▲":"▼"} ${esc(s.trend)}</td>
+      <td>${num(s.k,1)} <span class="muted">(préc. ${num(s.k_prev,1)})</span></td>
+      <td>${zone}</td><td>${sig}</td>
+      <td>${fx("long")}</td><td>${fx("short")}</td></tr>`;
+  }).join("");
+}
+
 function renderBot2(){
+  renderBot2Market();
   const bt = bot2Data;
   const badge=document.getElementById("b-b2");
   if(!bt){ if(badge) badge.textContent="—"; return; }
@@ -474,23 +522,36 @@ function renderBot2(){
      <span class="pill" style="margin-left:6px;background:#2a2f3a;color:var(--dim)">${bl["insuffisant"]||0} insuffisants</span>
      <span class="muted" style="margin-left:10px">profil ${key?parseFloat(key)+" R":""}</span>`;
   if(badge) badge.textContent=(bl["go"]||0);
+  const sp=b2Params();
+  const fluxes=p.fluxes||[];
+  let totalPnl=null, totN=0;
+  if(fluxes.length){
+    totalPnl=0;
+    for(const f of fluxes){
+      if(f.sum_r!=null){ totalPnl += f.sum_r*sp.cap*sp.riskFrac*(f.direction==="short"?sp.srf:1); }
+      totN += f.n||0;
+    }
+  }
   const port=p.portfolio;
-  document.getElementById("b2-port").innerHTML = port&&port.n ?
-    `Portefeuille : <span class="${evClass(port.pnl_usd)}">${signed(port.pnl_usd,0)} $</span>
-     <span class="muted" style="font-weight:400">(${port.n} trades · taux ${port.winrate==null?"—":Math.round(100*port.winrate)+" %"}
-     · PF ${port.profit_factor==null?"—":port.profit_factor.toFixed(2)} · Σ ${signed(port.sum_r,1)} R)</span>`
+  document.getElementById("b2-port").innerHTML = totalPnl!=null && totN ?
+    `Portefeuille : <span class="${evClass(totalPnl)}">${signed(totalPnl,0)} $</span>
+     <span class="muted" style="font-weight:400">sur capital ${num(sp.cap,0)} $ · risque ${(100*sp.riskFrac).toFixed(1)} %
+     (${totN} trades · taux ${port&&port.winrate!=null?Math.round(100*port.winrate)+" %":"—"}
+     · PF ${port&&port.profit_factor!=null?port.profit_factor.toFixed(2):"—"} · Σ ${port?signed(port.sum_r,1):"—"} R)</span>`
     : "Portefeuille : aucun trade.";
   const body=document.getElementById("b2-body");
-  const fx=(p.fluxes||[]).slice().sort((a,b)=>
+  const fx=fluxes.slice().sort((a,b)=>
     a.symbol.localeCompare(b.symbol) ||
     TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
     a.direction.localeCompare(b.direction));
-  if(!fx.length){ body.innerHTML='<tr><td class="muted" colspan="12">Pas encore calculé.</td></tr>'; return; }
+  if(!fx.length){ body.innerHTML='<tr><td class="muted" colspan="13">Pas encore calculé.</td></tr>'; return; }
   const ok=b=>b?"✓":"✗";
   body.innerHTML = fx.map(f=>{
     const v=f.verdict||{}, cls=v.statut==="go"?"good":v.statut==="insuffisant"?"muted":"bad";
     const tip=`n ${ok(v.n_ok)} · PF ${ok(v.pf_ok)} · t ${ok(v.t_ok)} · DD ${ok(v.dd_ok)}`+
       ` · dégr. ${ok(v.degr_ok)} · rétention ${ok(v.ret_ok)}`;
+    const pnl = f.sum_r==null?null:f.sum_r*sp.cap*sp.riskFrac*(f.direction==="short"?sp.srf:1);
+    const pnlPct = pnl==null?null:100*pnl/sp.cap;
     return `<tr>
       <td>${f.symbol} · ${f.timeframe} · <span class="${f.direction}">${f.direction}</span></td>
       <td>${f.n}</td><td>${pct(f.winrate,0)}</td><td>${num(f.profit_factor)}</td>
@@ -499,13 +560,17 @@ function renderBot2(){
       <td>${num(f.t_stat)}</td><td>${num(f.max_dd_r,1)}</td>
       <td>${num(f.mc_dd_p95_r,1)}</td>
       <td class="${f.retention!=null&&f.retention>=0.5?'good':f.retention!=null?'bad':''}">${num(f.retention,2)}</td>
-      <td class="${evClass(f.pnl_usd)}">${signed(f.pnl_usd,0)}</td>
+      <td class="${evClass(pnl)}"><b>${pnl==null?"—":signed(pnl,0)}</b></td>
+      <td class="${evClass(pnlPct)}">${pnlPct==null?"—":signed(pnlPct,1)+" %"}</td>
       <td class="${cls}" title="${tip}">${v.go?"✓ go":v.statut||"—"}</td></tr>`;
   }).join("");
 }
-{
-  const b2Sel=document.getElementById("b2-rr");
-  if(b2Sel) b2Sel.addEventListener("change", renderBot2);
+for(const id of ["b2-rr","b2-cap","b2-risk"]){
+  const el=document.getElementById(id);
+  if(el){
+    el.addEventListener("change", renderBot2);
+    el.addEventListener("input", renderBot2);
+  }
 }
 
 function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); refreshJournalPerso(); refreshBot2(); }

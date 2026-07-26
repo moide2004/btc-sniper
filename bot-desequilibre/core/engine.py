@@ -27,7 +27,9 @@ from .paper import (
     simulate_flux,
 )
 from .proba import annotate, build_proba, walk_forward
-from .pullback import PullbackParams, detect_pullback_setups
+from .pullback import (
+    PullbackParams, detect_pullback_setups, latest_pullback_setup, market_state,
+)
 from .risk import OpenPosition, RiskBook, monthly_corr, size_position
 from .store import Store, utc_now_iso, utc_now_ms
 
@@ -294,6 +296,96 @@ def recompute_backtest2(store: Store, logger=None) -> dict:
     return {"n_fluxes": len(profiles[live_key]["fluxes"]),
             "n_trades": len(prof[live_key]["trades"]),
             "bilan": profiles[live_key]["bilan"]}
+
+
+def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
+    """Analyse du marché EN DIRECT pour le Bot 2 : à chaque bougie d'analyse
+    clôturée (pb_timeframes), photographie l'état (tendance MM, %K, signal) et
+    émet un TICKET marqué bot=2 si un setup pullback est valide — annoté avec
+    les stats du flux issues du backtest2 (PF, n, verdict). Idempotent."""
+    params = PullbackParams()
+    emitted = 0
+    states = []
+    flux_info: dict[tuple, dict] = {}
+    raw = store.get_kv("backtest2")
+    if raw:
+        try:
+            bt2 = json.loads(raw)
+            for f in bt2.get("fluxes", []):
+                flux_info[(f["symbol"], f["timeframe"], f["direction"])] = f
+        except Exception:
+            pass
+    need_bars = (max(params.ma_slow, params.rsi_period + params.stoch_period
+                     + params.k_smooth, params.atr_period)
+                 + params.swing_lookback + 10)
+    for sym in CONFIG.symbols:
+        for tf in CONFIG.pb_timeframes:
+            try:
+                tail = load_ohlcv_tail(sym, "1m", need_bars * (TF_MS[tf] // 60_000) + 5)
+                if tail.empty:
+                    continue
+                df_tf = resample_1m(tail, tf)
+                if df_tf.empty:
+                    continue
+                stt = market_state(df_tf, params)
+                if stt:
+                    def _fx(d):
+                        fi = flux_info.get((sym, tf, d)) or {}
+                        return {"pf": fi.get("profit_factor"), "n": fi.get("n"),
+                                "verdict": (fi.get("verdict") or {}).get("statut")}
+                    states.append({"symbol": sym, "timeframe": tf, **stt,
+                                   "flux": {"long": _fx("long"), "short": _fx("short")}})
+                lco = _last_closed_open(now_ms, tf)
+                key = f"last_scan2_{sym}_{tf}"
+                if store.get_kv(key) == str(lco):
+                    continue
+                if int(df_tf["open_time"].iloc[-1]) != lco:
+                    continue                        # bougie pas encore disponible
+                store.set_kv(key, str(lco))
+                setup = latest_pullback_setup(df_tf, params)
+                if setup is None:
+                    continue
+                sizing = size_position(setup.entry, setup.stop_dist, setup.direction)
+                fi = flux_info.get((sym, tf, setup.direction)) or {}
+                verdict = (fi.get("verdict") or {}).get("statut")
+                payload = {
+                    "bot": "2", "strategie": "trend-pullback",
+                    "direction": setup.direction, "rr_mult": CONFIG.rr_mult,
+                    "entry_ref": setup.entry, "entry_is_proxy": setup.entry_is_proxy,
+                    "sl": setup.sl, "tp": setup.tp(CONFIG.rr_mult),
+                    "stop_dist": setup.stop_dist, "atr": setup.atr,
+                    "signal_open_ms": setup.signal_open_ms,
+                    "signal_close_ms": setup.signal_close_ms,
+                    "entry_time_ms": setup.entry_time_ms,
+                    "sizing": None if sizing is None else {
+                        "risk_usd": sizing.risk_usd, "size_units": sizing.size_units,
+                        "notional_usd": sizing.notional_usd,
+                        "risk_pct_capital": sizing.risk_pct_capital},
+                    "flux_stats": {"pf": fi.get("profit_factor"), "n": fi.get("n"),
+                                   "verdict": verdict},
+                }
+                tid = store.emit_ticket(sym, tf, payload)
+                store.add_event("ticket", "info",
+                                f"[Bot 2] Ticket {sym} {tf} {setup.direction.upper()} — "
+                                f"flux {verdict or 'non jugé'} "
+                                f"(PF={_fmt(fi.get('profit_factor'))}, n={fi.get('n', '—')})",
+                                {"ticket_id": tid, "bot": "2"})
+                send_push(
+                    f"[Bot 2] {sym} {tf} {setup.direction.upper()} — pullback",
+                    f"Entrée ≈ {setup.entry:.2f} · SL {setup.sl:.2f} · "
+                    f"TP {setup.tp(CONFIG.rr_mult):.2f}\n"
+                    f"Flux : {verdict or 'non jugé'} · PF={_fmt(fi.get('profit_factor'))} "
+                    f"· n={fi.get('n', '—')}",
+                    priority="default", tags="test_tube")
+                if logger:
+                    logger.info(f"[Bot 2] Ticket #{tid} {sym} {tf} {setup.direction}")
+                emitted += 1
+            except Exception as e:
+                if logger:
+                    logger.warning(f"bot2_live_scan {sym} {tf} : {e!r}")
+    store.set_kv("bot2_market", json.dumps({"generated_at": utc_now_iso(),
+                                            "states": states}))
+    return emitted
 
 
 # ===========================================================================
