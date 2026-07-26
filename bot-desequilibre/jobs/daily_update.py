@@ -22,7 +22,9 @@ from core.data_source import (  # noqa: E402
     DataSource, count_duplicates, find_gaps, load_ohlcv, resample_1m,
     save_ohlcv_atomic,
 )
-from core.engine import recompute_backtest, recompute_proba_tables  # noqa: E402
+from core.engine import (  # noqa: E402
+    recompute_backtest, recompute_backtest2, recompute_proba_tables,
+)
 from core.logging_setup import get_logger  # noqa: E402
 from core.store import Store  # noqa: E402
 
@@ -124,6 +126,16 @@ def main() -> None:
     except Exception as e:
         log.error(f"Backtest en échec (poursuite) : {e!r}")
         store.add_event("performance", "warning", f"Backtest échoué : {e!r}")
+
+    try:                                        # BOT 2 (laboratoire trend-pullback)
+        b2 = recompute_backtest2(store, logger=log)
+        log.info(f"Bot 2 recalculé : {b2['n_fluxes']} flux, {b2['n_trades']} trades, "
+                 f"bilan {b2['bilan']}")
+        store.add_event("worker", "info",
+                        f"Bot 2 (pullback) recalculé ({b2['n_trades']} trades)", b2)
+    except Exception as e:
+        log.error(f"Bot 2 en échec (poursuite) : {e!r}")
+        store.add_event("performance", "warning", f"Bot 2 échoué : {e!r}")
 
     gaps = {sym: len(find_gaps(load_ohlcv(sym, "1m"))) for sym in CONFIG.symbols}
     dups = {sym: count_duplicates(load_ohlcv(sym, "1m")) for sym in CONFIG.symbols}

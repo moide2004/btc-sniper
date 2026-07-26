@@ -76,6 +76,18 @@ class Config:
         self.risk_cap_pct = float(_get("RISK_CAP_PCT", "4.0"))       # §5.4 plafond risque ouvert
         self.corr_high = float(_get("CORR_HIGH", "0.8"))             # §5.4 seuil ρ élevé
 
+        # --- BOT 2 (laboratoire) : stratégie trend-pullback (§ core/pullback) --
+        self.pb_ma_fast = int(_get("PB_MA_FAST", "20"))
+        self.pb_ma_slow = int(_get("PB_MA_SLOW", "50"))
+        self.pb_rsi_period = int(_get("PB_RSI_PERIOD", "14"))
+        self.pb_stoch_period = int(_get("PB_STOCH_PERIOD", "14"))
+        self.pb_k_smooth = int(_get("PB_K_SMOOTH", "3"))
+        self.pb_os_low = float(_get("PB_OS_LOW", "20"))
+        self.pb_os_high = float(_get("PB_OS_HIGH", "80"))
+        self.pb_swing = int(_get("PB_SWING", "10"))
+        self.pb_timeframes = [s.strip() for s in
+                              _get("PB_TIMEFRAMES", "4h,12h,1D").split(",") if s.strip()]
+
         self.heartbeat_seconds = int(_get("HEARTBEAT_SECONDS", "30"))
         self.primary_silence_seconds = int(_get("PRIMARY_SILENCE_SECONDS", "300"))
 

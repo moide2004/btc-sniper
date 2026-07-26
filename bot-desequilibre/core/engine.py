@@ -26,7 +26,8 @@ from .paper import (
     advance_live_position, flux_summary, mc_drawdown_p95, new_live_position,
     simulate_flux,
 )
-from .proba import annotate, build_proba
+from .proba import annotate, build_proba, walk_forward
+from .pullback import PullbackParams, detect_pullback_setups
 from .risk import OpenPosition, RiskBook, monthly_corr, size_position
 from .store import Store, utc_now_iso, utc_now_ms
 
@@ -223,6 +224,76 @@ def _p5_verdict(summ: dict, retention: Optional[float] = None,
                 "raison": f"n<{CONFIG.solide_min_n}", **crits}
     go = bool(crit_pf and crit_t and crit_dd and crit_ret and crit_degr)
     return {"statut": "go" if go else "no-go", "go": go, **crits}
+
+
+# ===========================================================================
+# BOT 2 (laboratoire) — backtest trend-pullback, même mesure, même verdict
+# ===========================================================================
+def recompute_backtest2(store: Store, logger=None) -> dict:
+    """Rejoue la stratégie TREND-PULLBACK (core/pullback.py) sur l'historique,
+    flux par flux et pour chaque rr de la grille — mêmes conditions honnêtes
+    que le Bot Déséquilibré (double barrière pessimiste, BE, coûts taker,
+    walk-forward, verdict P5). Stocke le résultat sous la clé kv `backtest2`."""
+    params = PullbackParams()
+    rr_live = CONFIG.rr_mult
+    grid = list(dict.fromkeys(list(CONFIG.rr_grid) + [rr_live]))
+    prof: dict[str, dict] = {f"{rr:.2f}": {"fluxes": [], "trades": []} for rr in grid}
+    for sym in CONFIG.symbols:
+        df_1m = load_ohlcv(sym, "1m")
+        if df_1m.empty:
+            continue
+        ot = df_1m["open_time"].to_numpy(dtype="int64")
+        highs = df_1m["high"].to_numpy(dtype="float64")
+        lows = df_1m["low"].to_numpy(dtype="float64")
+        for tf in CONFIG.pb_timeframes:
+            df_tf = resample_1m(df_1m, tf)
+            if df_tf.empty:
+                continue
+            setups = detect_pullback_setups(df_tf, params)
+            for direction in DIRECTIONS:
+                flux_setups = [s for s in setups if s.direction == direction]
+                for rr in grid:
+                    key = f"{rr:.2f}"
+                    trades = simulate_flux(flux_setups, ot, highs, lows, rr)
+                    summ = flux_summary(trades)
+                    summ["mc_dd_p95_r"] = mc_drawdown_p95([t.r_net for t in trades])
+                    summ.update({"symbol": sym, "timeframe": tf,
+                                 "direction": direction, "n_setups": len(flux_setups)})
+                    wf = walk_forward(flux_setups, rr, ot, highs, lows)
+                    summ["retention"] = wf.get("retention")
+                    summ["wf_status"] = wf.get("status")
+                    summ["verdict"] = _p5_verdict(summ, wf.get("retention"),
+                                                  wf.get("status"))
+                    prof[key]["fluxes"].append(summ)
+                    prof[key]["trades"].extend(trades)
+                    if logger and rr == rr_live:
+                        logger.info(f"bot2 {sym} {tf} {direction} : n={summ['n']} "
+                                    f"PF={_fmt(summ['profit_factor'])} "
+                                    f"verdict={summ['verdict']['statut']}")
+        del df_1m
+    profiles = {}
+    for key, p in prof.items():
+        p["trades"].sort(key=lambda t: (t.exit_time_ms or t.entry_time_ms))
+        port = flux_summary(p["trades"])
+        bilan = {"go": 0, "no-go": 0, "insuffisant": 0}
+        for f in p["fluxes"]:
+            bilan[f["verdict"]["statut"]] = bilan.get(f["verdict"]["statut"], 0) + 1
+        profiles[key] = {"rr": float(key), "fluxes": p["fluxes"], "bilan": bilan,
+                         "portfolio": {**port,
+                                       "equity_usd": CONFIG.capital_usd + port["pnl_usd"]}}
+    live_key = f"{rr_live:.2f}"
+    result = {"generated_at": utc_now_iso(), "capital_usd": CONFIG.capital_usd,
+              "rr": rr_live, "strategie": "trend-pullback (MM20/50 + Stoch RSI)",
+              "params": {"ma_fast": params.ma_fast, "ma_slow": params.ma_slow,
+                         "os_low": params.os_low, "os_high": params.os_high,
+                         "swing_lookback": params.swing_lookback,
+                         "timeframes": CONFIG.pb_timeframes},
+              "profiles": profiles, **profiles[live_key]}
+    result["rr"] = rr_live
+    store.set_kv("backtest2", json.dumps(result))
+    return {"n_fluxes": len(profiles[live_key]["fluxes"]),
+            "n_trades": len(prof[live_key]["trades"]),
+            "bilan": profiles[live_key]["bilan"]}
 
 
 # ===========================================================================

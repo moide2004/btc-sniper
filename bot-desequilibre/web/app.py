@@ -257,6 +257,18 @@ def api_probas():
                     "note": "Chiffres MESURÉS (double barrière), pas des prédictions."})
 
 
+@app.route("/api/bot2")
+@login_required
+def api_bot2():
+    import json as _json
+    with _read_store() as st:
+        raw = st.get_kv("backtest2")
+    if not raw:
+        return jsonify({"generated_at": utc_now_iso(), "backtest": None,
+                        "note": "Bot 2 pas encore calculé — lancer jobs/daily_update.py."})
+    return jsonify({"generated_at": utc_now_iso(), "backtest": _json.loads(raw)})
+
+
 @app.route("/api/tickets")
 @login_required
 def api_tickets():

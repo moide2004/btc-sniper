@@ -75,6 +75,7 @@
     <div class="tab" data-view="tickets">Tickets <span class="badge" id="b-tk">0</span></div>
     <div class="tab" data-view="livre">Livre &amp; budget</div>
     <div class="tab" data-view="perso">Mon journal <span class="badge" id="b-jp">0</span></div>
+    <div class="tab" data-view="bot2">🧪 Bot 2 · Pullback <span class="badge" id="b-b2">—</span></div>
   </div>
 
   <!-- VUE 1 — SANTÉ -->
@@ -178,6 +179,36 @@
     </div>
   </section>
 
+  <!-- VUE 6 — BOT 2 (laboratoire trend-pullback) -->
+  <section id="v-bot2" class="view">
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">🧪 Laboratoire — stratégie « TREND-PULLBACK » (indépendante du Bot Déséquilibré)</div>
+      <p class="muted" style="margin:0 0 8px">
+        <b>Règles :</b> tendance = MM20 vs MM50 (au-dessus → longs seuls, en dessous → shorts seuls) ·
+        entrée = le Stoch RSI re-croise <b>au-dessus de 20</b> (long) / <b>en dessous de 80</b> (short) ·
+        SL = extrême des 10 dernières bougies (borné en ATR) · TP = rr × stop · break-even ·
+        <b>mêmes conditions honnêtes</b> que le Bot 1 : double barrière pessimiste, frais taker, walk-forward, verdict P5.
+        Timeframes : <span id="b2-tfs">4h · 12h · 1D</span>.</p>
+      <div class="jp-form" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <label class="k">Profil TP (rrMult) <select id="b2-rr"></select></label>
+        <span class="muted" style="align-self:end" id="b2-gen">—</span>
+      </div>
+      <div id="b2-bilan" class="muted" style="margin:10px 0 4px">—</div>
+      <div id="b2-port" style="font-size:18px;font-weight:700;margin-bottom:8px">—</div>
+    </div>
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Résultats par flux (2 ans rejoués)</div>
+      <div class="scroll"><table><thead><tr>
+        <th>Actif · TF · sens</th><th>n</th><th>taux</th><th>PF</th><th>espérance R</th>
+        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th>
+        <th>PnL $</th><th>verdict</th>
+      </tr></thead><tbody id="b2-body"><tr><td class="muted" colspan="12">Pas encore calculé —
+        lancer <code>jobs/daily_update.py</code> (ou attendre 00:10 UTC).</td></tr></tbody></table></div>
+      <p class="muted">PnL affiché au capital/risque du serveur (.env). Un flux « no-go » est un
+        résultat de recherche : la stratégie n'a pas d'edge prouvé sur ce flux.</p>
+    </div>
+  </section>
+
   <!-- VUE 5 — MON JOURNAL (saisie manuelle de TES trades) -->
   <section id="v-perso" class="view">
     <div class="card">
@@ -212,6 +243,6 @@
     </div>
   </section>
 
-  <script src="/static/app.js?v=12"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>

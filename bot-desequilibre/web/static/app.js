@@ -439,6 +439,75 @@ window.jpDelete = jpDelete;
 const _jpBtn = document.getElementById("jp-add");
 if(_jpBtn) _jpBtn.addEventListener("click", jpAdd);
 
-function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); refreshJournalPerso(); }
+// ---- Vue Bot 2 (laboratoire trend-pullback) --------------------------------
+let bot2Data = null;
+async function refreshBot2(){
+  try{
+    const d = await getJSON("/api/bot2"); if(!d) return;
+    bot2Data = d.backtest;
+    renderBot2();
+  }catch(e){}
+}
+
+function renderBot2(){
+  const bt = bot2Data;
+  const badge=document.getElementById("b-b2");
+  if(!bt){ if(badge) badge.textContent="—"; return; }
+  const liveKey = bt.rr!=null ? Number(bt.rr).toFixed(2) : null;
+  const sel=document.getElementById("b2-rr");
+  const profs=bt.profiles||{};
+  const keys=Object.keys(profs).sort((a,b)=>parseFloat(a)-parseFloat(b));
+  if(sel && keys.length && sel.options.length!==keys.length){
+    const cur=sel.value;
+    sel.innerHTML=keys.map(k=>`<option value="${k}">${parseFloat(k)} R${k===liveKey?" (vivant)":""}</option>`).join("");
+    sel.value = keys.includes(cur)?cur:liveKey;
+  }
+  const key=(sel&&sel.value)||liveKey;
+  const p=profs[key]||{fluxes:bt.fluxes||[],bilan:bt.bilan,portfolio:bt.portfolio};
+  document.getElementById("b2-gen").textContent="recalculé "+(bt.generated_at||"—");
+  if(bt.params&&bt.params.timeframes)
+    document.getElementById("b2-tfs").textContent=bt.params.timeframes.join(" · ");
+  const bl=p.bilan||{};
+  document.getElementById("b2-bilan").innerHTML=
+    `<span class="pill solide">${bl["go"]||0} go</span>
+     <span class="pill spec" style="margin-left:6px">${bl["no-go"]||0} no-go</span>
+     <span class="pill" style="margin-left:6px;background:#2a2f3a;color:var(--dim)">${bl["insuffisant"]||0} insuffisants</span>
+     <span class="muted" style="margin-left:10px">profil ${key?parseFloat(key)+" R":""}</span>`;
+  if(badge) badge.textContent=(bl["go"]||0);
+  const port=p.portfolio;
+  document.getElementById("b2-port").innerHTML = port&&port.n ?
+    `Portefeuille : <span class="${evClass(port.pnl_usd)}">${signed(port.pnl_usd,0)} $</span>
+     <span class="muted" style="font-weight:400">(${port.n} trades · taux ${port.winrate==null?"—":Math.round(100*port.winrate)+" %"}
+     · PF ${port.profit_factor==null?"—":port.profit_factor.toFixed(2)} · Σ ${signed(port.sum_r,1)} R)</span>`
+    : "Portefeuille : aucun trade.";
+  const body=document.getElementById("b2-body");
+  const fx=(p.fluxes||[]).slice().sort((a,b)=>
+    a.symbol.localeCompare(b.symbol) ||
+    TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
+    a.direction.localeCompare(b.direction));
+  if(!fx.length){ body.innerHTML='<tr><td class="muted" colspan="12">Pas encore calculé.</td></tr>'; return; }
+  const ok=b=>b?"✓":"✗";
+  body.innerHTML = fx.map(f=>{
+    const v=f.verdict||{}, cls=v.statut==="go"?"good":v.statut==="insuffisant"?"muted":"bad";
+    const tip=`n ${ok(v.n_ok)} · PF ${ok(v.pf_ok)} · t ${ok(v.t_ok)} · DD ${ok(v.dd_ok)}`+
+      ` · dégr. ${ok(v.degr_ok)} · rétention ${ok(v.ret_ok)}`;
+    return `<tr>
+      <td>${f.symbol} · ${f.timeframe} · <span class="${f.direction}">${f.direction}</span></td>
+      <td>${f.n}</td><td>${pct(f.winrate,0)}</td><td>${num(f.profit_factor)}</td>
+      <td class="${evClass(f.expectancy_r)}">${signed(f.expectancy_r,3)}</td>
+      <td class="${evClass(f.sum_r)}">${signed(f.sum_r,1)}</td>
+      <td>${num(f.t_stat)}</td><td>${num(f.max_dd_r,1)}</td>
+      <td>${num(f.mc_dd_p95_r,1)}</td>
+      <td class="${f.retention!=null&&f.retention>=0.5?'good':f.retention!=null?'bad':''}">${num(f.retention,2)}</td>
+      <td class="${evClass(f.pnl_usd)}">${signed(f.pnl_usd,0)}</td>
+      <td class="${cls}" title="${tip}">${v.go?"✓ go":v.statut||"—"}</td></tr>`;
+  }).join("");
+}
+{
+  const b2Sel=document.getElementById("b2-rr");
+  if(b2Sel) b2Sel.addEventListener("change", renderBot2);
+}
+
+function refreshAll(){ refreshHealth(); refreshEvents(); refreshMatrice(); refreshTickets(); refreshLivre(); refreshJournalPerso(); refreshBot2(); }
 refreshAll();
 setInterval(refreshAll, 15000);
