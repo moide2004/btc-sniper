@@ -30,6 +30,10 @@ from .proba import annotate, build_proba, walk_forward
 from .pullback import (
     PullbackParams, detect_pullback_setups, latest_pullback_setup, market_state,
 )
+from .wavetrend import (
+    WaveTrendParams, detect_wavetrend_setups, latest_wavetrend_setup,
+    market_state_wt,
+)
 from .risk import OpenPosition, RiskBook, monthly_corr, size_position
 from .store import Store, utc_now_iso, utc_now_ms
 
@@ -231,12 +235,12 @@ def _p5_verdict(summ: dict, retention: Optional[float] = None,
 # ===========================================================================
 # BOT 2 (laboratoire) — backtest trend-pullback, même mesure, même verdict
 # ===========================================================================
-def recompute_backtest2(store: Store, logger=None) -> dict:
-    """Rejoue la stratégie TREND-PULLBACK (core/pullback.py) sur l'historique,
-    flux par flux et pour chaque rr de la grille — mêmes conditions honnêtes
-    que le Bot Déséquilibré (double barrière pessimiste, BE, coûts taker,
-    walk-forward, verdict P5). Stocke le résultat sous la clé kv `backtest2`."""
-    params = PullbackParams()
+def _lab_backtest(store: Store, kv_key: str, label: str, detect_fn, timeframes,
+                  params_doc: dict, log_prefix: str, logger=None) -> dict:
+    """Moteur GÉNÉRIQUE de laboratoire : rejoue une stratégie sur l'historique,
+    flux par flux et pour chaque rr de la grille — mêmes conditions honnêtes que
+    le Bot Déséquilibré (double barrière pessimiste, BE, coûts taker,
+    walk-forward, verdict P5). Stocke le résultat sous la clé kv `kv_key`."""
     rr_live = CONFIG.rr_mult
     grid = list(dict.fromkeys(list(CONFIG.rr_grid) + [rr_live]))
     prof: dict[str, dict] = {f"{rr:.2f}": {"fluxes": [], "trades": []} for rr in grid}
@@ -247,11 +251,11 @@ def recompute_backtest2(store: Store, logger=None) -> dict:
         ot = df_1m["open_time"].to_numpy(dtype="int64")
         highs = df_1m["high"].to_numpy(dtype="float64")
         lows = df_1m["low"].to_numpy(dtype="float64")
-        for tf in CONFIG.pb_timeframes:
+        for tf in timeframes:
             df_tf = resample_1m(df_1m, tf)
             if df_tf.empty:
                 continue
-            setups = detect_pullback_setups(df_tf, params)
+            setups = detect_fn(df_tf)
             for direction in DIRECTIONS:
                 flux_setups = [s for s in setups if s.direction == direction]
                 for rr in grid:
@@ -269,8 +273,8 @@ def recompute_backtest2(store: Store, logger=None) -> dict:
                     prof[key]["fluxes"].append(summ)
                     prof[key]["trades"].extend(trades)
                     if logger and rr == rr_live:
-                        logger.info(f"bot2 {sym} {tf} {direction} : n={summ['n']} "
-                                    f"PF={_fmt(summ['profit_factor'])} "
+                        logger.info(f"{log_prefix} {sym} {tf} {direction} : "
+                                    f"n={summ['n']} PF={_fmt(summ['profit_factor'])} "
                                     f"verdict={summ['verdict']['statut']}")
         del df_1m
     profiles = {}
@@ -285,41 +289,57 @@ def recompute_backtest2(store: Store, logger=None) -> dict:
                                        "equity_usd": CONFIG.capital_usd + port["pnl_usd"]}}
     live_key = f"{rr_live:.2f}"
     result = {"generated_at": utc_now_iso(), "capital_usd": CONFIG.capital_usd,
-              "rr": rr_live, "strategie": "trend-pullback (MM20/50 + Stoch RSI)",
-              "params": {"ma_fast": params.ma_fast, "ma_slow": params.ma_slow,
-                         "os_low": params.os_low, "os_high": params.os_high,
-                         "swing_lookback": params.swing_lookback,
-                         "timeframes": CONFIG.pb_timeframes},
+              "rr": rr_live, "strategie": label,
+              "params": {**params_doc, "timeframes": list(timeframes)},
               "profiles": profiles, **profiles[live_key]}
     result["rr"] = rr_live
-    store.set_kv("backtest2", json.dumps(result))
+    store.set_kv(kv_key, json.dumps(result))
     return {"n_fluxes": len(profiles[live_key]["fluxes"]),
             "n_trades": len(prof[live_key]["trades"]),
             "bilan": profiles[live_key]["bilan"]}
 
 
-def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
-    """Analyse du marché EN DIRECT pour le Bot 2 : à chaque bougie d'analyse
-    clôturée (pb_timeframes), photographie l'état (tendance MM, %K, signal) et
-    émet un TICKET marqué bot=2 si un setup pullback est valide — annoté avec
-    les stats du flux issues du backtest2 (PF, n, verdict). Idempotent."""
+def recompute_backtest2(store: Store, logger=None) -> dict:
+    """BOT 2 — trend-pullback (core/pullback.py)."""
     params = PullbackParams()
+    return _lab_backtest(
+        store, "backtest2", "trend-pullback (MM20/50 + Stoch RSI)",
+        lambda df: detect_pullback_setups(df, params), CONFIG.pb_timeframes,
+        {"ma_fast": params.ma_fast, "ma_slow": params.ma_slow,
+         "os_low": params.os_low, "os_high": params.os_high,
+         "swing_lookback": params.swing_lookback}, "bot2", logger)
+
+
+def recompute_backtest3(store: Store, logger=None) -> dict:
+    """BOT 3 — VuManChu / WaveTrend (core/wavetrend.py)."""
+    params = WaveTrendParams()
+    return _lab_backtest(
+        store, "backtest3", "vumanchu-wavetrend (croisement WT en zone ±53, filtre MM)",
+        lambda df: detect_wavetrend_setups(df, params), CONFIG.vmc_timeframes,
+        {"n1": params.n1, "n2": params.n2, "smooth": params.smooth,
+         "os_level": params.os_level, "ma_fast": params.ma_fast,
+         "ma_slow": params.ma_slow, "swing_lookback": params.swing_lookback},
+        "bot3", logger)
+
+
+def _lab_live_scan(store: Store, now_ms: int, bot_id: str, name: str,
+                   latest_fn, market_fn, timeframes, need_bars: int,
+                   kv_backtest: str, kv_market: str, logger=None) -> int:
+    """Scan live GÉNÉRIQUE de laboratoire : photographie l'état du marché de
+    chaque flux et émet un TICKET marqué bot=<bot_id> si un setup est valide —
+    annoté des stats du flux issues du backtest correspondant. Idempotent."""
     emitted = 0
     states = []
     flux_info: dict[tuple, dict] = {}
-    raw = store.get_kv("backtest2")
+    raw = store.get_kv(kv_backtest)
     if raw:
         try:
-            bt2 = json.loads(raw)
-            for f in bt2.get("fluxes", []):
+            for f in json.loads(raw).get("fluxes", []):
                 flux_info[(f["symbol"], f["timeframe"], f["direction"])] = f
         except Exception:
             pass
-    need_bars = (max(params.ma_slow, params.rsi_period + params.stoch_period
-                     + params.k_smooth, params.atr_period)
-                 + params.swing_lookback + 10)
     for sym in CONFIG.symbols:
-        for tf in CONFIG.pb_timeframes:
+        for tf in timeframes:
             try:
                 tail = load_ohlcv_tail(sym, "1m", need_bars * (TF_MS[tf] // 60_000) + 5)
                 if tail.empty:
@@ -327,7 +347,7 @@ def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
                 df_tf = resample_1m(tail, tf)
                 if df_tf.empty:
                     continue
-                stt = market_state(df_tf, params)
+                stt = market_fn(df_tf)
                 if stt:
                     def _fx(d):
                         fi = flux_info.get((sym, tf, d)) or {}
@@ -336,20 +356,20 @@ def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
                     states.append({"symbol": sym, "timeframe": tf, **stt,
                                    "flux": {"long": _fx("long"), "short": _fx("short")}})
                 lco = _last_closed_open(now_ms, tf)
-                key = f"last_scan2_{sym}_{tf}"
+                key = f"last_scan{bot_id}_{sym}_{tf}"
                 if store.get_kv(key) == str(lco):
                     continue
                 if int(df_tf["open_time"].iloc[-1]) != lco:
                     continue                        # bougie pas encore disponible
                 store.set_kv(key, str(lco))
-                setup = latest_pullback_setup(df_tf, params)
+                setup = latest_fn(df_tf)
                 if setup is None:
                     continue
                 sizing = size_position(setup.entry, setup.stop_dist, setup.direction)
                 fi = flux_info.get((sym, tf, setup.direction)) or {}
                 verdict = (fi.get("verdict") or {}).get("statut")
                 payload = {
-                    "bot": "2", "strategie": "trend-pullback",
+                    "bot": bot_id, "strategie": name,
                     "direction": setup.direction, "rr_mult": CONFIG.rr_mult,
                     "entry_ref": setup.entry, "entry_is_proxy": setup.entry_is_proxy,
                     "sl": setup.sl, "tp": setup.tp(CONFIG.rr_mult),
@@ -366,26 +386,48 @@ def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
                 }
                 tid = store.emit_ticket(sym, tf, payload)
                 store.add_event("ticket", "info",
-                                f"[Bot 2] Ticket {sym} {tf} {setup.direction.upper()} — "
-                                f"flux {verdict or 'non jugé'} "
+                                f"[Bot {bot_id}] Ticket {sym} {tf} "
+                                f"{setup.direction.upper()} — flux {verdict or 'non jugé'} "
                                 f"(PF={_fmt(fi.get('profit_factor'))}, n={fi.get('n', '—')})",
-                                {"ticket_id": tid, "bot": "2"})
+                                {"ticket_id": tid, "bot": bot_id})
                 send_push(
-                    f"[Bot 2] {sym} {tf} {setup.direction.upper()} — pullback",
+                    f"[Bot {bot_id}] {sym} {tf} {setup.direction.upper()} — {name}",
                     f"Entrée ≈ {setup.entry:.2f} · SL {setup.sl:.2f} · "
                     f"TP {setup.tp(CONFIG.rr_mult):.2f}\n"
                     f"Flux : {verdict or 'non jugé'} · PF={_fmt(fi.get('profit_factor'))} "
                     f"· n={fi.get('n', '—')}",
                     priority="default", tags="test_tube")
                 if logger:
-                    logger.info(f"[Bot 2] Ticket #{tid} {sym} {tf} {setup.direction}")
+                    logger.info(f"[Bot {bot_id}] Ticket #{tid} {sym} {tf} {setup.direction}")
                 emitted += 1
             except Exception as e:
                 if logger:
-                    logger.warning(f"bot2_live_scan {sym} {tf} : {e!r}")
-    store.set_kv("bot2_market", json.dumps({"generated_at": utc_now_iso(),
-                                            "states": states}))
+                    logger.warning(f"lab_live_scan bot{bot_id} {sym} {tf} : {e!r}")
+    store.set_kv(kv_market, json.dumps({"generated_at": utc_now_iso(),
+                                        "states": states}))
     return emitted
+
+
+def bot2_live_scan(store: Store, now_ms: int, logger=None) -> int:
+    params = PullbackParams()
+    need = (max(params.ma_slow, params.rsi_period + params.stoch_period
+                + params.k_smooth, params.atr_period) + params.swing_lookback + 10)
+    return _lab_live_scan(store, now_ms, "2", "trend-pullback",
+                          lambda df: latest_pullback_setup(df, params),
+                          lambda df: market_state(df, params),
+                          CONFIG.pb_timeframes, need, "backtest2", "bot2_market",
+                          logger)
+
+
+def bot3_live_scan(store: Store, now_ms: int, logger=None) -> int:
+    params = WaveTrendParams()
+    need = (max(params.ma_slow, params.n1 + params.n2 + params.smooth,
+                params.atr_period) + params.swing_lookback + 10)
+    return _lab_live_scan(store, now_ms, "3", "vumanchu-wavetrend",
+                          lambda df: latest_wavetrend_setup(df, params),
+                          lambda df: market_state_wt(df, params),
+                          CONFIG.vmc_timeframes, need, "backtest3", "bot3_market",
+                          logger)
 
 
 # ===========================================================================

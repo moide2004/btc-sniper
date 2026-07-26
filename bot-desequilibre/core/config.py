@@ -88,6 +88,17 @@ class Config:
         self.pb_timeframes = [s.strip() for s in
                               _get("PB_TIMEFRAMES", "4h,12h,1D").split(",") if s.strip()]
 
+        # --- BOT 3 (laboratoire) : VuManChu / WaveTrend (§ core/wavetrend) ----
+        self.vmc_n1 = int(_get("VMC_N1", "10"))
+        self.vmc_n2 = int(_get("VMC_N2", "21"))
+        self.vmc_smooth = int(_get("VMC_SMOOTH", "4"))
+        self.vmc_os_level = float(_get("VMC_OS_LEVEL", "53"))
+        self.vmc_ma_fast = int(_get("VMC_MA_FAST", "20"))
+        self.vmc_ma_slow = int(_get("VMC_MA_SLOW", "50"))
+        self.vmc_swing = int(_get("VMC_SWING", "10"))
+        self.vmc_timeframes = [s.strip() for s in
+                               _get("VMC_TIMEFRAMES", "4h,12h,1D").split(",") if s.strip()]
+
         self.heartbeat_seconds = int(_get("HEARTBEAT_SECONDS", "30"))
         self.primary_silence_seconds = int(_get("PRIMARY_SILENCE_SECONDS", "300"))
 

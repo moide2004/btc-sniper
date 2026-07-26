@@ -23,7 +23,8 @@ from core.data_source import (  # noqa: E402
     save_ohlcv_atomic,
 )
 from core.engine import (  # noqa: E402
-    recompute_backtest, recompute_backtest2, recompute_proba_tables,
+    recompute_backtest, recompute_backtest2, recompute_backtest3,
+    recompute_proba_tables,
 )
 from core.logging_setup import get_logger  # noqa: E402
 from core.store import Store  # noqa: E402
@@ -136,6 +137,16 @@ def main() -> None:
     except Exception as e:
         log.error(f"Bot 2 en échec (poursuite) : {e!r}")
         store.add_event("performance", "warning", f"Bot 2 échoué : {e!r}")
+
+    try:                                        # BOT 3 (laboratoire VuManChu/WaveTrend)
+        b3 = recompute_backtest3(store, logger=log)
+        log.info(f"Bot 3 recalculé : {b3['n_fluxes']} flux, {b3['n_trades']} trades, "
+                 f"bilan {b3['bilan']}")
+        store.add_event("worker", "info",
+                        f"Bot 3 (VuManChu) recalculé ({b3['n_trades']} trades)", b3)
+    except Exception as e:
+        log.error(f"Bot 3 en échec (poursuite) : {e!r}")
+        store.add_event("performance", "warning", f"Bot 3 échoué : {e!r}")
 
     gaps = {sym: len(find_gaps(load_ohlcv(sym, "1m"))) for sym in CONFIG.symbols}
     dups = {sym: count_duplicates(load_ohlcv(sym, "1m")) for sym in CONFIG.symbols}

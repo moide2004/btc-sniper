@@ -76,6 +76,7 @@
     <div class="tab" data-view="livre">Livre &amp; budget</div>
     <div class="tab" data-view="perso">Mon journal <span class="badge" id="b-jp">0</span></div>
     <div class="tab" data-view="bot2">🧪 Bot 2 · Pullback <span class="badge" id="b-b2">—</span></div>
+    <div class="tab" data-view="bot3">🧪 Bot 3 · VuManChu <span class="badge" id="b-b3">—</span></div>
   </div>
 
   <!-- VUE 1 — SANTÉ -->
@@ -228,6 +229,56 @@
     </div>
   </section>
 
+  <!-- VUE 7 — BOT 3 (laboratoire VuManChu / WaveTrend) -->
+  <section id="v-bot3" class="view">
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">🧪 Laboratoire — stratégie « VUMANCHU / WAVETREND » (cœur de Cipher B)</div>
+      <p class="muted" style="margin:0 0 8px">
+        <b>Règles :</b> tendance = MM20 vs MM50 (longs seuls au-dessus, shorts seuls en dessous) ·
+        entrée = <b>croisement WaveTrend</b> (wt1 croise wt2) pendant que wt1 est
+        <b>sous −53</b> (long, « point vert en survente ») / <b>au-dessus de +53</b> (short) ·
+        SL = extrême des 10 dernières bougies (borné en ATR) · TP = rr × stop · break-even ·
+        <b>mêmes conditions honnêtes</b> : double barrière pessimiste, frais taker, walk-forward, verdict P5.
+        Timeframes : <span id="b3-tfs">4h · 12h · 1D</span>.</p>
+      <div class="jp-form" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        <label class="k">Profil TP (rrMult) <select id="b3-rr"></select></label>
+        <label class="k">Capital ($) <input id="b3-cap" type="number" step="any" min="1" placeholder="10000"></label>
+        <label class="k">Risque par trade (%) <input id="b3-risk" type="number" step="any" min="0.01" placeholder="1"></label>
+        <span class="muted" style="align-self:end" id="b3-gen">—</span>
+      </div>
+      <div id="b3-bilan" class="muted" style="margin:10px 0 4px">—</div>
+      <div id="b3-port" style="font-size:18px;font-weight:700;margin-bottom:8px">—</div>
+    </div>
+
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">📡 Analyse du marché EN DIRECT (dernière bougie close par flux)</div>
+      <div class="scroll"><table><thead><tr>
+        <th>Actif · TF</th><th>Tendance (MM20/50)</th><th>WT1 / WT2</th><th>Zone (±53)</th>
+        <th>Signal MAINTENANT</th><th>Flux long (2 ans)</th><th>Flux short (2 ans)</th>
+      </tr></thead><tbody id="b3-mkt"><tr><td class="muted" colspan="7">En attente du worker
+        (rafraîchi ~2 min).</td></tr></tbody></table></div>
+      <p class="muted">« Signal ⚡ » = croisement WaveTrend en zone extrême validé à la clôture →
+        ticket + notification. Sinon : ce qu'il MANQUE pour un signal.</p>
+    </div>
+
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Tickets Bot 3 (setups signalés)</div>
+      <ul id="b3-tickets"><li class="muted">Aucun ticket pour l'instant.</li></ul>
+    </div>
+
+    <div class="card">
+      <div class="k" style="margin-bottom:6px">Résultats par flux (2 ans rejoués) — livre &amp; budget du Bot 3</div>
+      <div class="scroll"><table><thead><tr>
+        <th>Actif · TF · sens</th><th>n</th><th>taux</th><th>PF</th><th>espérance R</th>
+        <th>Σ R</th><th>t-stat</th><th>DD max R</th><th>DD MC p95</th><th>rétention</th>
+        <th>PnL $</th><th>% capital</th><th>verdict</th>
+      </tr></thead><tbody id="b3-body"><tr><td class="muted" colspan="13">Pas encore calculé —
+        lancer <code>jobs/daily_update.py</code> (ou attendre 00:10 UTC).</td></tr></tbody></table></div>
+      <p class="muted">PnL et % capital recalculés instantanément pour TON capital et TON risque
+        (short ×0,75). Un flux « no-go » est un résultat de recherche.</p>
+    </div>
+  </section>
+
   <!-- VUE 5 — MON JOURNAL (saisie manuelle de TES trades) -->
   <section id="v-perso" class="view">
     <div class="card">
@@ -262,6 +313,6 @@
     </div>
   </section>
 
-  <script src="/static/app.js?v=14"></script>
+  <script src="/static/app.js?v=15"></script>
 </body>
 </html>
