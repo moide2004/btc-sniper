@@ -129,11 +129,14 @@ def _fmt(x) -> str:
 # ===========================================================================
 def recompute_backtest(store: Store, logger=None) -> dict:
     """Rejoue TOUT l'historique en paper trading, flux par flux (actif × TF ×
-    direction), au rrMult vivant. Stocke un résumé mesuré par flux + un agrégat
-    portefeuille. À lancer dans la tâche quotidienne (après les tables §3)."""
+    direction), pour CHAQUE profil rrMult de la grille §3 (le rr vivant est
+    toujours inclus). Stocke par profil : résumés de flux + bilan go/no-go +
+    agrégat portefeuille. Les champs de premier niveau restent ceux du rr
+    vivant (compatibilité). À lancer dans la tâche quotidienne (après §3)."""
     params = FibParams()
-    rr = CONFIG.rr_mult
-    fluxes, all_trades = [], []
+    rr_live = CONFIG.rr_mult
+    grid = list(dict.fromkeys(list(CONFIG.rr_grid) + [rr_live]))
+    prof: dict[str, dict] = {f"{rr:.2f}": {"fluxes": [], "trades": []} for rr in grid}
     for sym in CONFIG.symbols:
         df_1m = load_ohlcv(sym, "1m")
         if df_1m.empty:
@@ -145,39 +148,51 @@ def recompute_backtest(store: Store, logger=None) -> dict:
             df_tf = resample_1m(df_1m, tf)
             if df_tf.empty:
                 continue
-            setups = detect_setups(df_tf, params)
+            setups = detect_setups(df_tf, params)      # indépendants du rr
             for direction in DIRECTIONS:
                 if direction == "short" and not CONFIG.activer_shorts:
                     continue
                 flux_setups = [s for s in setups if s.direction == direction]
-                trades = simulate_flux(flux_setups, ot, highs, lows, rr)
-                summ = flux_summary(trades)
-                summ["mc_dd_p95_r"] = mc_drawdown_p95([t.r_net for t in trades])
-                summ.update({"symbol": sym, "timeframe": tf, "direction": direction,
-                             "n_setups": len(flux_setups)})
-                # Rétention + statut walk-forward viennent de la table §3 (rr vivant).
                 pb = store.latest_proba(sym, tf, direction) or {}
-                wf = pb.get("walk_forward", {}).get(f"{rr:.2f}", {})
-                summ["retention"] = wf.get("retention")
-                summ["wf_status"] = wf.get("status")
-                summ["verdict"] = _p5_verdict(summ, wf.get("retention"), wf.get("status"))
-                fluxes.append(summ)
-                all_trades.extend(trades)
-                if logger:
-                    logger.info(f"backtest {sym} {tf} {direction} : n={summ['n']} "
-                                f"PF={_fmt(summ['profit_factor'])} verdict={summ['verdict']['statut']}")
+                for rr in grid:
+                    key = f"{rr:.2f}"
+                    trades = simulate_flux(flux_setups, ot, highs, lows, rr)
+                    summ = flux_summary(trades)
+                    summ["mc_dd_p95_r"] = mc_drawdown_p95([t.r_net for t in trades])
+                    summ.update({"symbol": sym, "timeframe": tf,
+                                 "direction": direction, "n_setups": len(flux_setups)})
+                    # Rétention + statut walk-forward de la table §3 AU MÊME rr.
+                    wf = pb.get("walk_forward", {}).get(key, {})
+                    summ["retention"] = wf.get("retention")
+                    summ["wf_status"] = wf.get("status")
+                    summ["verdict"] = _p5_verdict(summ, wf.get("retention"),
+                                                  wf.get("status"))
+                    prof[key]["fluxes"].append(summ)
+                    prof[key]["trades"].extend(trades)
+                    if logger and rr == rr_live:
+                        logger.info(f"backtest {sym} {tf} {direction} : n={summ['n']} "
+                                    f"PF={_fmt(summ['profit_factor'])} "
+                                    f"verdict={summ['verdict']['statut']}")
         del df_1m
-    all_trades.sort(key=lambda t: (t.exit_time_ms or t.entry_time_ms))
-    port = flux_summary(all_trades)
-    equity_usd = CONFIG.capital_usd + port["pnl_usd"]
-    bilan = {"go": 0, "no-go": 0, "insuffisant": 0}
-    for f in fluxes:
-        bilan[f["verdict"]["statut"]] = bilan.get(f["verdict"]["statut"], 0) + 1
+    profiles = {}
+    for key, p in prof.items():
+        p["trades"].sort(key=lambda t: (t.exit_time_ms or t.entry_time_ms))
+        port = flux_summary(p["trades"])
+        bilan = {"go": 0, "no-go": 0, "insuffisant": 0}
+        for f in p["fluxes"]:
+            bilan[f["verdict"]["statut"]] = bilan.get(f["verdict"]["statut"], 0) + 1
+        profiles[key] = {"rr": float(key), "fluxes": p["fluxes"], "bilan": bilan,
+                         "portfolio": {**port,
+                                       "equity_usd": CONFIG.capital_usd + port["pnl_usd"]}}
+    live_key = f"{rr_live:.2f}"
     result = {"generated_at": utc_now_iso(), "capital_usd": CONFIG.capital_usd,
-              "rr": rr, "fluxes": fluxes, "bilan": bilan,
-              "portfolio": {**port, "equity_usd": equity_usd}}
+              "rr": rr_live, "profiles": profiles, **profiles[live_key]}
+    result["rr"] = rr_live
     store.set_kv("backtest", json.dumps(result))
-    return {"n_fluxes": len(fluxes), "n_trades": len(all_trades), "bilan": bilan}
+    return {"n_fluxes": len(profiles[live_key]["fluxes"]),
+            "n_trades": len(prof[live_key]["trades"]),
+            "bilan": profiles[live_key]["bilan"],
+            "rr_profiles": sorted(profiles.keys(), key=float)}
 
 
 def _p5_verdict(summ: dict, retention: Optional[float] = None,

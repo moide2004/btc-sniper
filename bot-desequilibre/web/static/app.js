@@ -186,6 +186,30 @@ function fluxPnl(f, sp){
   return f.sum_r * sp.cap * sp.riskFrac * factor;
 }
 
+// Profil rrMult sélectionné dans la vue Livre (repli : données du rr vivant).
+function livreProfile(){
+  const bt = livreData && livreData.backtest;
+  if(!bt) return null;
+  const liveKey = bt.rr!=null ? Number(bt.rr).toFixed(2) : null;
+  const sel = document.getElementById("lv-rr");
+  const profs = bt.profiles;
+  if(!profs){          // ancien format : uniquement le rr vivant
+    if(sel && !sel.options.length && liveKey)
+      sel.innerHTML = `<option value="${liveKey}">${parseFloat(liveKey)} R (vivant)</option>`;
+    return {key:liveKey, fluxes:bt.fluxes||[], bilan:bt.bilan, portfolio:bt.portfolio};
+  }
+  const keys = Object.keys(profs).sort((a,b)=>parseFloat(a)-parseFloat(b));
+  if(sel && sel.options.length !== keys.length){
+    const cur = sel.value;
+    sel.innerHTML = keys.map(k=>
+      `<option value="${k}">${parseFloat(k)} R${k===liveKey?" (vivant)":""}</option>`).join("");
+    sel.value = keys.includes(cur) ? cur : liveKey;
+  }
+  const key = (sel && sel.value) || liveKey;
+  const p = profs[key] || profs[liveKey] || {};
+  return {key, fluxes:p.fluxes||[], bilan:p.bilan, portfolio:p.portfolio};
+}
+
 async function refreshLivre(){
   try{
     const d = await getJSON("/api/livre"); if(!d) return;
@@ -206,14 +230,16 @@ function renderLivre(){
     document.getElementById("risk-open").textContent = num(d.risque_ouvert_pct,2)+" %";
     document.getElementById("risk-cap").textContent = num(d.plafond_pct,1)+" %";
     const bt = d.backtest;
+    const prof = livreProfile();
     const sp = simParams();
     let totalPnl = null;
-    if(bt&&bt.fluxes){
+    if(prof&&prof.fluxes.length){
       totalPnl = 0;
-      for(const f of bt.fluxes){ const v=fluxPnl(f,sp); if(v!=null) totalPnl+=v; }
+      for(const f of prof.fluxes){ const v=fluxPnl(f,sp); if(v!=null) totalPnl+=v; }
     }
     document.getElementById("equity").textContent = totalPnl!=null ?
-      num(sp.cap+totalPnl,0)+" $ ("+signed(totalPnl,0)+" $ sur capital "+num(sp.cap,0)+" $)" : "—";
+      num(sp.cap+totalPnl,0)+" $ ("+signed(totalPnl,0)+" $ sur capital "+num(sp.cap,0)+" $"
+      +(prof&&prof.key?" · profil "+parseFloat(prof.key)+" R":"")+")" : "—";
 
     // Positions ouvertes.
     const pb=document.getElementById("pos-body"), pos=d.positions||[];
@@ -223,17 +249,18 @@ function renderLivre(){
        <td>${p.be_done?"✓":"—"}</td><td>${num(p.risk_usd,0)}</td></tr>`).join("")
       : '<tr><td class="muted" colspan="6">Aucune position ouverte.</td></tr>';
 
-    // Bilan récapitulatif P5.
-    const bl=bt&&bt.bilan;
+    // Bilan récapitulatif P5 (au profil sélectionné).
+    const bl=prof&&prof.bilan;
     document.getElementById("bilan").innerHTML = bl ?
       `<span class="pill solide">${bl["go"]||0} go</span>
        <span class="pill spec" style="margin-left:6px">${bl["no-go"]||0} no-go</span>
        <span class="pill" style="margin-left:6px;background:#2a2f3a;color:var(--dim)">${bl["insuffisant"]||0} insuffisants</span>
-       <span class="muted" style="margin-left:10px">recalculé ${bt.generated_at||""}</span>` : "—";
+       <span class="muted" style="margin-left:10px">profil ${prof.key?parseFloat(prof.key)+" R":""}
+         · recalculé ${bt&&bt.generated_at||""}</span>` : "—";
 
-    // Backtest par flux + verdict (5 critères en infobulle).
+    // Backtest par flux + verdict (5 critères en infobulle), au profil choisi.
     const bb=document.getElementById("bt-body");
-    const fx = bt&&bt.fluxes ? bt.fluxes.slice().sort((a,b)=>
+    const fx = prof&&prof.fluxes.length ? prof.fluxes.slice().sort((a,b)=>
       a.symbol.localeCompare(b.symbol) ||
       TF_ORDER.indexOf(a.timeframe)-TF_ORDER.indexOf(b.timeframe) ||
       a.direction.localeCompare(b.direction)) : [];
@@ -277,8 +304,8 @@ function renderLivre(){
 function renderSim(){
   const res=document.getElementById("sim-res"), det=document.getElementById("sim-det");
   if(!res) return;
-  const bt = livreData && livreData.backtest;
-  if(!bt || !bt.fluxes || !bt.fluxes.length){
+  const prof = livreProfile();
+  if(!prof || !prof.fluxes.length){
     res.textContent="—"; res.className="";
     det.textContent="Backtest pas encore calculé (tâche quotidienne 00:10 UTC).";
     return;
@@ -287,7 +314,7 @@ function renderSim(){
         tf=document.getElementById("sim-tf").value,
         dir=document.getElementById("sim-dir").value;
   const sp=simParams();
-  const f=bt.fluxes.find(x=>x.symbol===sym&&x.timeframe===tf&&x.direction===dir);
+  const f=prof.fluxes.find(x=>x.symbol===sym&&x.timeframe===tf&&x.direction===dir);
   if(!f || !f.n){
     res.textContent="Aucun trade mesuré sur ce flux";
     res.className="";
@@ -306,12 +333,13 @@ function renderSim(){
     : " · ⚠ flux no-go : la stratégie n'a pas d'edge prouvé ici";
   det.textContent=`${f.n} trades · taux ${f.winrate==null?"—":Math.round(100*f.winrate)+" %"}`+
     ` · PF ${f.profit_factor==null?"—":f.profit_factor.toFixed(2)}`+
+    ` · profil ${prof.key?parseFloat(prof.key)+" R":"—"}`+
     ` · capital ${sp.cap.toLocaleString("fr-FR")} $ · risque ${(100*sp.riskFrac).toFixed(1)} %`+
     `${dir==="short"?" (×"+sp.srf+")":""} · verdict : ${v.statut||"—"}${warn}`;
 }
 
 // Recalcul instantané quand on change un réglage du simulateur.
-for(const id of ["sim-cap","sim-risk","sim-sym","sim-tf","sim-dir"]){
+for(const id of ["sim-cap","sim-risk","sim-sym","sim-tf","sim-dir","lv-rr"]){
   const el=document.getElementById(id);
   if(el){
     const h=()=>{ el.dataset.touched="1"; renderLivre(); };
